@@ -126,9 +126,9 @@ Acceptance:
       bounded-retry it without touching unrelated VLC processes.
 - [ ] Prefer the active X11/Wayland session, then try installed DRM/KMS output,
       then framebuffer output when available.
-- [ ] Add systemd service templates for emitter and receiver and a graphical
+- [x] Add systemd service templates for emitter and receiver and a graphical
       session environment hook.
-- [ ] Document device permissions, autologin desktop setup, direct display,
+- [x] Document device permissions, autologin desktop setup, direct display,
       HDMI, and Raspberry Pi composite provisioning.
 - [ ] Restore the selected stream and fullscreen playback after reboot.
 
@@ -188,3 +188,17 @@ Acceptance targets on a healthy small LAN:
   one receiver is discovered over alternating IPv4 and IPv6 addresses.
 - Next action: add bounded IPv4 direct probing and receiver hint exchange, then
   automate the synthetic integration test and test restart restoration.
+
+### 2026-09-29 — fallback discovery, deployment, and repeatable test
+
+- Added the delayed IPv4 direct-probe fallback. It scans each active local
+  `/24` at 128 new addresses per second with at most 64 workers, short
+  timeouts, and patvs health-response validation.
+- Added systemd emitter/receiver units, environment configuration, runtime
+  environment defaults, direct-display provisioning notes, and Raspberry Pi
+  composite guidance.
+- Added `scripts/integration-test.sh`; it launches a receiver and red/green
+  emitters, waits for both registrations, validates snapshot pixel colours,
+  and confirms that a wrong shared secret is rejected. The test passes.
+- Next action: exchange verified receiver hints for routed networks, exercise
+  state restoration across receiver restart, and add bounded VLC retry tests.

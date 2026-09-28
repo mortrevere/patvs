@@ -47,19 +47,31 @@ func run(args []string) error {
 	}
 
 	flags := flag.NewFlagSet(mode, flag.ContinueOnError)
-	cfg := patvs.Config{Mode: mode, Secret: "patvs", APIAddr: ":7411", DiscoveryPort: 7412, StreamAddr: "127.0.0.1:7413"}
+	secret := os.Getenv("PATVS_SECRET")
+	if secret == "" {
+		secret = "patvs"
+	}
+	cfg := patvs.Config{Mode: mode, Secret: secret, APIAddr: ":7411", DiscoveryPort: 7412, StreamAddr: "127.0.0.1:7413"}
 	flags.StringVar(&cfg.Name, "name", "", "human-readable device name (default: hostname)")
 	flags.StringVar(&cfg.Secret, "secret", cfg.Secret, "shared installation secret")
 	flags.StringVar(&cfg.StatePath, "state", "", "state file path")
 	flags.StringVar(&cfg.APIAddr, "listen", cfg.APIAddr, "receiver API listen address")
 	flags.IntVar(&cfg.DiscoveryPort, "discovery-port", cfg.DiscoveryPort, "UDP discovery port")
 	flags.StringVar(&cfg.StreamAddr, "stream-listen", cfg.StreamAddr, "receiver loopback stream address")
-	seedText := strings.TrimSpace(builtSeeds)
+	seedText := strings.TrimSpace(strings.Join([]string{builtSeeds, os.Getenv("PATVS_SEEDS")}, ","))
 	flags.StringVar(&seedText, "seeds", seedText, "comma-separated receiver addresses")
 	flags.BoolVar(&cfg.JSON, "json", false, "print machine-readable JSON")
-	flags.StringVar(&cfg.Camera, "camera", "auto", "V4L2 device, lavfi expression, or auto")
+	camera := os.Getenv("PATVS_CAMERA")
+	if camera == "" {
+		camera = "auto"
+	}
+	flags.StringVar(&cfg.Camera, "camera", camera, "V4L2 device, lavfi expression, or auto")
 	flags.StringVar(&cfg.SnapshotDir, "snapshot-dir", "", "receiver snapshot directory")
-	flags.StringVar(&cfg.Player, "player", "vlc", "VLC executable path")
+	player := os.Getenv("PATVS_PLAYER")
+	if player == "" {
+		player = "vlc"
+	}
+	flags.StringVar(&cfg.Player, "player", player, "VLC executable path")
 	flags.BoolVar(&cfg.Debug, "debug", false, "enable debug logs")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err

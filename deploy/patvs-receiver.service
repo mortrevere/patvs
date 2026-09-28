@@ -1,0 +1,20 @@
+[Unit]
+Description=patvs video receiver
+After=network.target
+
+[Service]
+Type=simple
+User=patvs
+Group=patvs
+SupplementaryGroups=video render
+EnvironmentFile=-/etc/patvs/patvs.env
+EnvironmentFile=-/run/patvs/display.env
+ExecStart=/usr/local/bin/patvs receiver --state /var/lib/patvs/receiver.json --snapshot-dir /var/lib/patvs/snapshots
+Restart=always
+RestartSec=2
+StateDirectory=patvs
+RuntimeDirectory=patvs
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

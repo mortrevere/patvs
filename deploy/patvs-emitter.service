@@ -1,0 +1,18 @@
+[Unit]
+Description=patvs camera emitter
+After=network.target
+
+[Service]
+Type=simple
+User=patvs
+Group=patvs
+SupplementaryGroups=video
+EnvironmentFile=-/etc/patvs/patvs.env
+ExecStart=/usr/local/bin/patvs emitter --state /var/lib/patvs/emitter.json
+Restart=always
+RestartSec=2
+StateDirectory=patvs
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

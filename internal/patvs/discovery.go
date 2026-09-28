@@ -89,10 +89,19 @@ func discover(ctx context.Context, cfg Config, wait time.Duration) ([]ReceiverIn
 	defer cancel()
 	results := make(chan ReceiverInfo, 32)
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(4)
 	go func() { defer wg.Done(); discoverUDP4(discoveryCtx, cfg.DiscoveryPort, results) }()
 	go func() { defer wg.Done(); discoverUDP6(discoveryCtx, cfg.DiscoveryPort, results) }()
 	go func() { defer wg.Done(); discoverSeeds(discoveryCtx, cfg.Seeds, results) }()
+	go func() {
+		defer wg.Done()
+		select {
+		case <-discoveryCtx.Done():
+			return
+		case <-time.After(1200 * time.Millisecond):
+			discoverDirect(discoveryCtx, apiPort(cfg.APIAddr), results)
+		}
+	}()
 	go func() { wg.Wait(); close(results) }()
 
 	peers := make(map[string]ReceiverInfo)
@@ -106,6 +115,82 @@ func discover(ctx context.Context, cfg Config, wait time.Duration) ([]ReceiverIn
 		answer = append(answer, peer)
 	}
 	return answer, nil
+}
+
+func discoverDirect(ctx context.Context, port int, results chan<- ReceiverInfo) {
+	if port == 0 {
+		port = 7411
+	}
+	jobs := make(chan netip.Addr)
+	var workers sync.WaitGroup
+	client := &http.Client{Timeout: 300 * time.Millisecond}
+	for range 64 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for address := range jobs {
+				endpoint := net.JoinHostPort(address.String(), strconv.Itoa(port))
+				if peer, ok := probeReceiver(ctx, client, endpoint); ok {
+					select {
+					case results <- peer:
+					case <-ctx.Done():
+						return
+					}
+				}
+			}
+		}()
+	}
+	ticker := time.NewTicker(time.Second / 128)
+	defer ticker.Stop()
+	for _, candidate := range directCandidates() {
+		select {
+		case <-ctx.Done():
+			close(jobs)
+			workers.Wait()
+			return
+		case <-ticker.C:
+		}
+		select {
+		case jobs <- candidate:
+		case <-ctx.Done():
+			close(jobs)
+			workers.Wait()
+			return
+		}
+	}
+	close(jobs)
+	workers.Wait()
+}
+
+func directCandidates() []netip.Addr {
+	interfaces, _ := net.Interfaces()
+	seen := make(map[netip.Addr]bool)
+	var result []netip.Addr
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addresses, _ := iface.Addrs()
+		for _, raw := range addresses {
+			prefix, err := netip.ParsePrefix(raw.String())
+			if err != nil || !prefix.Addr().Is4() {
+				continue
+			}
+			local := prefix.Addr()
+			scanPrefix := netip.PrefixFrom(local, 24).Masked()
+			if prefix.Bits() > 24 {
+				scanPrefix = prefix.Masked()
+			}
+			for address := scanPrefix.Addr().Next(); scanPrefix.Contains(address); address = address.Next() {
+				next := address.Next()
+				if next.IsValid() && scanPrefix.Contains(next) && address != local && !seen[address] {
+					seen[address] = true
+					result = append(result, address)
+				}
+			}
+		}
+	}
+	return result
 }
 
 func discoverUDP4(ctx context.Context, port int, results chan<- ReceiverInfo) {
@@ -232,25 +317,31 @@ func discoverSeeds(ctx context.Context, seeds []string, results chan<- ReceiverI
 		if !strings.Contains(seed, ":") {
 			seed = net.JoinHostPort(seed, "7411")
 		}
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+seed+"/v1/health", nil)
-		if err != nil {
-			continue
-		}
-		response, err := client.Do(request)
-		if err != nil {
-			continue
-		}
-		var identity Identity
-		err = json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&identity)
-		response.Body.Close()
-		if err == nil && response.StatusCode == http.StatusOK && identity.ID != "" {
+		if peer, ok := probeReceiver(ctx, &client, seed); ok {
 			select {
-			case results <- ReceiverInfo{ID: identity.ID, Name: identity.Name, Address: seed, LastSeen: time.Now()}:
+			case results <- peer:
 			case <-ctx.Done():
 				return
 			}
 		}
 	}
+}
+
+func probeReceiver(ctx context.Context, client *http.Client, endpoint string) (ReceiverInfo, bool) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+endpoint+"/v1/health", nil)
+	if err != nil {
+		return ReceiverInfo{}, false
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return ReceiverInfo{}, false
+	}
+	defer response.Body.Close()
+	var identity Identity
+	if response.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&identity) != nil || identity.ID == "" {
+		return ReceiverInfo{}, false
+	}
+	return ReceiverInfo{ID: identity.ID, Name: identity.Name, Address: endpoint, LastSeen: time.Now()}, true
 }
 
 func apiPort(address string) int {

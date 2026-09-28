@@ -59,6 +59,38 @@ Add `--json` before the command for machine-readable output. For repeatable
 video tests, an emitter can use an FFmpeg source such as
 `--camera 'lavfi:color=c=red:s=640x480:r=25'`.
 
+## Unattended installation
+
+Install the binary as `/usr/local/bin/patvs`, create a locked `patvs` system
+user, copy the required units from `deploy/` to `/etc/systemd/system/`, and copy
+`deploy/patvs.env.example` to `/etc/patvs/patvs.env`. Set the same
+`PATVS_SECRET` on every member of the installation, then enable either or both
+services:
+
+```sh
+systemctl enable --now patvs-emitter.service patvs-receiver.service
+```
+
+The service account needs the `video` group for cameras and the receiver also
+needs `render` for direct DRM/KMS output. For desktop playback, arrange for the
+graphical login session to write its `DISPLAY`, `WAYLAND_DISPLAY`,
+`XDG_RUNTIME_DIR`, and `DBUS_SESSION_BUS_ADDRESS` values to
+`/run/patvs/display.env`, then restart `patvs-receiver`. Without those values,
+patvs asks VLC to use DRM/KMS when `/dev/dri/card0` exists and framebuffer
+output when `/dev/fb0` exists.
+
+On Raspberry Pi OS, HDMI works through the normal KMS setup. Composite output
+must be provisioned before installation by enabling the composite KMS overlay
+and selecting the required PAL/NTSC mode in the Raspberry Pi boot
+configuration; composite and HDMI behavior depends on the Pi model and OS
+release.
+
+Run the synthetic end-to-end check on a Linux development machine with FFmpeg:
+
+```sh
+./scripts/integration-test.sh
+```
+
 The default ports are TCP 7411 for the receiver API and emitter sessions, UDP
 7412 for discovery, and loopback TCP 7413 for received MJPEG streams. State is
 stored below `$XDG_STATE_HOME/patvs` or `~/.local/state/patvs`; emitter and
