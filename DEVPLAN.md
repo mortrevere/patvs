@@ -111,7 +111,7 @@ Acceptance:
 - [x] Accept stable IDs or unambiguous names and provide `--json` output.
 - [x] Build a compact keyboard-driven TUI over the same API, showing receiver
       reachability, emitters, last seen, stream/playback intent, and errors.
-- [ ] Keep TUI refresh asynchronous so one unreachable receiver cannot freeze
+- [x] Keep TUI refresh asynchronous so one unreachable receiver cannot freeze
       navigation.
 
 Acceptance:
@@ -124,13 +124,13 @@ Acceptance:
 
 - [x] Supervise one VLC process started by patvs; start, replace, stop, and
       bounded-retry it without touching unrelated VLC processes.
-- [ ] Prefer the active X11/Wayland session, then try installed DRM/KMS output,
+- [x] Prefer the active X11/Wayland session, then try installed DRM/KMS output,
       then framebuffer output when available.
 - [x] Add systemd service templates for emitter and receiver and a graphical
       session environment hook.
 - [x] Document device permissions, autologin desktop setup, direct display,
       HDMI, and Raspberry Pi composite provisioning.
-- [ ] Restore the selected stream and fullscreen playback after reboot.
+- [x] Restore the selected stream and fullscreen playback after reboot.
 
 Acceptance:
 
@@ -149,7 +149,7 @@ Acceptance:
       Ethernet switch, reboots, camera removal, and route changes.
 - [ ] Measure discovery, reconnect, and display latency; record hardware and OS
       versions in the session log.
-- [ ] Document the future relay seam and the evidence needed before choosing a
+- [x] Document the future relay seam and the evidence needed before choosing a
       relay protocol.
 
 Acceptance targets on a healthy small LAN:
@@ -235,3 +235,26 @@ Acceptance targets on a healthy small LAN:
   confirms persisted stream intent is still enabled.
 - Next action: make TUI refresh non-blocking, test malformed protocol limits,
   and exercise fullscreen playback restoration with a controllable fake VLC.
+
+### 2026-09-29 — responsive controller and protocol boundary
+
+- TUI discovery, receiver status refresh, and actions now run asynchronously;
+  terminal input remains responsive while a receiver is slow or unreachable.
+- Added API tests for incorrect secrets and oversized JSON. Existing frame
+  limits cap WebSocket messages and reject non-JPEG binary payloads.
+- Added `docs/PROTOCOL.md` describing local wire behavior and the future relay
+  boundary, including the measurements and security properties needed before
+  selecting a relay protocol.
+- Next action: test fullscreen intent restoration with a fake VLC and add
+  targeted address-change and malformed WebSocket integration cases.
+
+### 2026-09-29 — playback restoration
+
+- The two-receiver harness now uses a controllable fake VLC. It starts
+  fullscreen playback, verifies the receiver owns a player process, restarts
+  the receiver, and confirms the saved source, stream intent, and player
+  process return after emitter reconnection.
+- Desktop sessions remain the default VLC output. Headless receivers select
+  DRM/KMS when available, then framebuffer output.
+- Next action: add malformed WebSocket and address-change cases, then move to
+  Raspberry Pi field acceptance for the actual VLC display paths.

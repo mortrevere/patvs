@@ -333,12 +333,16 @@ func (r *receiver) handleSession(w http.ResponseWriter, request *http.Request) {
 			r.dirty = true
 			r.mu.Unlock()
 		case websocket.BinaryMessage:
-			if len(data) < 4 || len(data) > maxFrameSize || data[0] != 0xff || data[1] != 0xd8 {
+			if !validJPEGFrame(data) {
 				continue
 			}
 			r.acceptFrame(register.ID, data)
 		}
 	}
+}
+
+func validJPEGFrame(data []byte) bool {
+	return len(data) >= 4 && len(data) <= maxFrameSize && data[0] == 0xff && data[1] == 0xd8 && data[len(data)-2] == 0xff && data[len(data)-1] == 0xd9
 }
 
 func (r *receiver) acceptFrame(id string, data []byte) {

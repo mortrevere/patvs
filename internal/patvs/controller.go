@@ -233,46 +233,122 @@ func (c controllerClient) request(ctx context.Context, peer ReceiverInfo, method
 }
 
 func (c controllerClient) runTUI(ctx context.Context) error {
-	reader := bufio.NewReader(os.Stdin)
-	for {
-		peers, _ := discover(ctx, c.cfg, 2200*time.Millisecond)
-		sort.Slice(peers, func(i, j int) bool { return peers[i].Name < peers[j].Name })
+	lines := make(chan string)
+	inputErr := make(chan error, 1)
+	go func() {
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			select {
+			case lines <- strings.TrimSpace(scanner.Text()):
+			case <-ctx.Done():
+				return
+			}
+		}
+		inputErr <- scanner.Err()
+	}()
+	updates := make(chan []ReceiverInfo, 1)
+	go func() {
+		ticker := time.NewTicker(3 * time.Second)
+		defer ticker.Stop()
+		for {
+			peers, _ := discover(ctx, c.cfg, 2200*time.Millisecond)
+			peers = c.expandHints(ctx, peers)
+			sort.Slice(peers, func(i, j int) bool { return peers[i].Name < peers[j].Name })
+			select {
+			case updates <- peers:
+			default:
+				select {
+				case <-updates:
+				default:
+				}
+				select {
+				case updates <- peers:
+				default:
+				}
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	var peers []ReceiverInfo
+	draw := func() {
 		fmt.Print("\033[2J\033[Hpatvs controller\n\n")
 		for index, peer := range peers {
 			fmt.Printf("  %d  %-20s %s\n", index+1, peer.Name, peer.Address)
 		}
 		if len(peers) == 0 {
-			fmt.Println("  No receivers discovered.")
+			fmt.Println("  Discovering receivers…")
 		}
 		fmt.Print("\nEnter receiver number, r to refresh, or q to quit: ")
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			return err
-		}
-		line = strings.TrimSpace(line)
-		if line == "q" {
+	}
+	draw()
+	for {
+		select {
+		case <-ctx.Done():
 			return nil
-		}
-		if line == "r" || line == "" {
-			continue
-		}
-		var selected int
-		if _, err := fmt.Sscanf(line, "%d", &selected); err != nil || selected < 1 || selected > len(peers) {
-			continue
-		}
-		if err := c.receiverMenu(ctx, reader, peers[selected-1]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			time.Sleep(time.Second)
+		case err := <-inputErr:
+			if err == nil {
+				return nil
+			}
+			return err
+		case peers = <-updates:
+			draw()
+		case line := <-lines:
+			if line == "q" {
+				return nil
+			}
+			if line == "r" || line == "" {
+				draw()
+				continue
+			}
+			var selected int
+			if _, err := fmt.Sscanf(line, "%d", &selected); err == nil && selected >= 1 && selected <= len(peers) {
+				if err := c.receiverMenu(ctx, lines, peers[selected-1]); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+				}
+				draw()
+			}
 		}
 	}
 }
 
-func (c controllerClient) receiverMenu(ctx context.Context, reader *bufio.Reader, peer ReceiverInfo) error {
-	for {
-		var status ReceiverStatus
-		if err := c.request(ctx, peer, http.MethodGet, "/v1/status", nil, &status); err != nil {
-			return err
+func (c controllerClient) receiverMenu(ctx context.Context, lines <-chan string, peer ReceiverInfo) error {
+	menuCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	updates := make(chan ReceiverStatus, 1)
+	actions := make(chan string, 1)
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			var status ReceiverStatus
+			if c.request(menuCtx, peer, http.MethodGet, "/v1/status", nil, &status) == nil {
+				select {
+				case updates <- status:
+				default:
+					select {
+					case <-updates:
+					default:
+					}
+					select {
+					case updates <- status:
+					default:
+					}
+				}
+			}
+			select {
+			case <-menuCtx.Done():
+				return
+			case <-ticker.C:
+			}
 		}
+	}()
+	var status ReceiverStatus
+	message := "Loading…"
+	draw := func() {
 		emitters := sortedEmitters(status.Emitters)
 		fmt.Print("\033[2J\033[H")
 		fmt.Printf("Receiver: %s (%s)\n\n", peer.Name, peer.Address)
@@ -290,45 +366,72 @@ func (c controllerClient) receiverMenu(ctx context.Context, reader *bufio.Reader
 			}
 			fmt.Printf("  %d  %-20s %-7s%s\n", index+1, emitter.Name, state, flags)
 		}
-		fmt.Print("\nCommands: play N, stream N, stopstream N, snap N, stop, back: ")
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			return err
-		}
-		fields := strings.Fields(line)
-		if len(fields) == 0 {
-			continue
-		}
-		if fields[0] == "back" {
+		fmt.Printf("\n%s\nCommands: play N, stream N, stopstream N, snap N, stop, back: ", message)
+	}
+	draw()
+	for {
+		select {
+		case <-ctx.Done():
 			return nil
-		}
-		if fields[0] == "stop" {
-			_ = c.request(ctx, peer, http.MethodDelete, "/v1/playback", nil, nil)
-			continue
-		}
-		if len(fields) != 2 {
-			continue
-		}
-		var selected int
-		if _, err := fmt.Sscanf(fields[1], "%d", &selected); err != nil || selected < 1 || selected > len(emitters) {
-			continue
-		}
-		id := emitters[selected-1].ID
-		switch fields[0] {
-		case "play":
-			_ = c.request(ctx, peer, http.MethodPut, "/v1/playback", map[string]string{"emitter_id": id}, nil)
-		case "stream":
-			_ = c.request(ctx, peer, http.MethodPut, "/v1/streams/"+id, map[string]bool{"enabled": true}, nil)
-		case "stopstream":
-			_ = c.request(ctx, peer, http.MethodPut, "/v1/streams/"+id, map[string]bool{"enabled": false}, nil)
-		case "snap":
-			var result map[string]string
-			if err := c.request(ctx, peer, http.MethodPost, "/v1/snapshots/"+id, nil, &result); err == nil {
-				fmt.Println("Saved", result["path"])
-				time.Sleep(time.Second)
+		case status = <-updates:
+			message = "Updated " + time.Now().Format("15:04:05")
+			draw()
+		case message = <-actions:
+			draw()
+		case line := <-lines:
+			fields := strings.Fields(line)
+			if len(fields) == 0 {
+				continue
 			}
+			if fields[0] == "back" {
+				return nil
+			}
+			emitters := sortedEmitters(status.Emitters)
+			if fields[0] == "stop" {
+				go func() {
+					err := c.request(menuCtx, peer, http.MethodDelete, "/v1/playback", nil, nil)
+					actions <- actionResult("playback stopped", err)
+				}()
+				continue
+			}
+			if len(fields) != 2 {
+				continue
+			}
+			var selected int
+			if _, err := fmt.Sscanf(fields[1], "%d", &selected); err != nil || selected < 1 || selected > len(emitters) {
+				continue
+			}
+			id, command := emitters[selected-1].ID, fields[0]
+			go func() {
+				var err error
+				switch command {
+				case "play":
+					err = c.request(menuCtx, peer, http.MethodPut, "/v1/playback", map[string]string{"emitter_id": id}, nil)
+				case "stream":
+					err = c.request(menuCtx, peer, http.MethodPut, "/v1/streams/"+id, map[string]bool{"enabled": true}, nil)
+				case "stopstream":
+					err = c.request(menuCtx, peer, http.MethodPut, "/v1/streams/"+id, map[string]bool{"enabled": false}, nil)
+				case "snap":
+					var result map[string]string
+					err = c.request(menuCtx, peer, http.MethodPost, "/v1/snapshots/"+id, nil, &result)
+					if err == nil {
+						actions <- "Saved " + result["path"]
+						return
+					}
+				default:
+					return
+				}
+				actions <- actionResult(command+" complete", err)
+			}()
 		}
 	}
+}
+
+func actionResult(success string, err error) string {
+	if err != nil {
+		return "Error: " + err.Error()
+	}
+	return success
 }
 
 func sortedEmitters(source map[string]EmitterInfo) []EmitterInfo {

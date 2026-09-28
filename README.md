@@ -97,4 +97,5 @@ stored below `$XDG_STATE_HOME/patvs` or `~/.local/state/patvs`; emitter and
 receiver modes use separate files and can run together.
 
 See [DEVPLAN.md](DEVPLAN.md) for milestones, acceptance criteria, and current
-implementation status.
+implementation status. [docs/PROTOCOL.md](docs/PROTOCOL.md) records the local
+wire behavior and the planned relay boundary.

@@ -11,6 +11,9 @@ api_port_2=$((api_port + 10))
 discovery_port_2=$((discovery_port + 10))
 stream_port_2=$((stream_port + 10))
 secret=integration-secret
+fake_player="$test_root/fake-vlc"
+printf '%s\n' '#!/bin/sh' 'trap "exit 0" INT TERM' 'while :; do sleep 1; done' >"$fake_player"
+chmod +x "$fake_player"
 
 cleanup() {
 	for pid in ${green_pid:-} ${red_pid:-} ${receiver_pid_2:-} ${receiver_pid:-}; do
@@ -25,12 +28,12 @@ go build -o "$test_bin" ./cmd/patvs
 "$test_bin" receiver --name test-receiver --state "$test_root/receiver.json" \
 	--snapshot-dir "$test_root/snapshots" --listen ":$api_port" \
 	--stream-listen "127.0.0.1:$stream_port" --discovery-port "$discovery_port" \
-	--secret "$secret" >"$test_root/receiver.log" 2>&1 &
+	--secret "$secret" --player "$fake_player" >"$test_root/receiver.log" 2>&1 &
 receiver_pid=$!
 "$test_bin" receiver --name test-receiver-2 --state "$test_root/receiver-2.json" \
 	--snapshot-dir "$test_root/snapshots-2" --listen ":$api_port_2" \
 	--stream-listen "127.0.0.1:$stream_port_2" --discovery-port "$discovery_port_2" \
-	--secret "$secret" >"$test_root/receiver-2.log" 2>&1 &
+	--secret "$secret" --player "$fake_player" >"$test_root/receiver-2.log" 2>&1 &
 receiver_pid_2=$!
 
 receiver_seeds="127.0.0.1:$api_port,127.0.0.1:$api_port_2"
@@ -93,16 +96,22 @@ timeout 8s ffmpeg -hide_banner -loglevel error -i "http://127.0.0.1:$stream_port
 timeout 8s ffmpeg -hide_banner -loglevel error -i "http://127.0.0.1:$stream_port_2/streams/$red_id.mjpg" \
 	-frames:v 1 -f null -
 
+"$test_bin" controller --secret "$secret" play "127.0.0.1:$api_port" red >/dev/null
+"$test_bin" controller --secret "$secret" status "127.0.0.1:$api_port" | grep -q '"player_pid":'
+
 kill "$receiver_pid"
 wait "$receiver_pid" 2>/dev/null || true
 "$test_bin" receiver --name test-receiver --state "$test_root/receiver.json" \
 	--snapshot-dir "$test_root/snapshots" --listen ":$api_port" \
 	--stream-listen "127.0.0.1:$stream_port" --discovery-port "$discovery_port" \
-	--secret "$secret" >"$test_root/receiver-restarted.log" 2>&1 &
+	--secret "$secret" --player "$fake_player" >"$test_root/receiver-restarted.log" 2>&1 &
 receiver_pid=$!
 restored=false
 for attempt in $(seq 1 20); do
-	if "$test_bin" controller --secret "$secret" status "127.0.0.1:$api_port" 2>/dev/null | grep -A3 '"streams"' | grep -q 'true'; then
+	status=$("$test_bin" controller --secret "$secret" status "127.0.0.1:$api_port" 2>/dev/null || true)
+	if printf '%s' "$status" | grep -q '"player_pid":' && \
+		printf '%s' "$status" | grep -q "\"playback\": \"$red_id\"" && \
+		printf '%s' "$status" | grep -A3 '"streams"' | grep -q 'true'; then
 		restored=true
 		break
 	fi
