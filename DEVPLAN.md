@@ -329,3 +329,7 @@ Acceptance targets on a healthy small LAN:
   reorder peers. The screen also shows camera errors and last-seen times.
 - Updated the README with the controller keys. The CLI commands and wire
   protocol remain unchanged.
+- A final process check found `red` receiver had crashed: the IPv4/IPv6 UDP
+  discovery readers could still send after the shared result channel closed.
+  Discovery now waits for both readers to exit before returning, so result
+  closure cannot race an active sender.

@@ -201,11 +201,14 @@ func discoverUDP4(ctx context.Context, port int, results chan<- ReceiverInfo) {
 	}
 	defer conn.Close()
 	_ = setBroadcast(conn)
-	go readDiscovery(ctx, conn, results)
+	readDone := make(chan struct{})
+	go func() { defer close(readDone); readDiscovery(ctx, conn, results) }()
 
 	targets := []*net.UDPAddr{{IP: net.IPv4(127, 0, 0, 1), Port: port}, {IP: net.IPv4bcast, Port: port}}
 	targets = append(targets, interfaceBroadcasts(port)...)
 	sendProbes(ctx, conn, targets)
+	_ = conn.Close()
+	<-readDone
 }
 
 func discoverUDP6(ctx context.Context, port int, results chan<- ReceiverInfo) {
@@ -215,7 +218,8 @@ func discoverUDP6(ctx context.Context, port int, results chan<- ReceiverInfo) {
 		return
 	}
 	defer conn.Close()
-	go readDiscovery(ctx, conn, results)
+	readDone := make(chan struct{})
+	go func() { defer close(readDone); readDiscovery(ctx, conn, results) }()
 	interfaces, _ := net.Interfaces()
 	var targets []*net.UDPAddr
 	for _, iface := range interfaces {
@@ -224,6 +228,8 @@ func discoverUDP6(ctx context.Context, port int, results chan<- ReceiverInfo) {
 		}
 	}
 	sendProbes(ctx, conn, targets)
+	_ = conn.Close()
+	<-readDone
 }
 
 func sendProbes(ctx context.Context, conn *net.UDPConn, targets []*net.UDPAddr) {
