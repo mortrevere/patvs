@@ -42,7 +42,10 @@ custom shared value for an installation. Run any mode with `-h` for common
 options.
 
 The controller starts its interactive terminal interface when no command is
-given. Scriptable commands are:
+given. Use ↑/↓ or `j`/`k` to select a receiver, Enter to open it, and the
+same keys to select an emitter. `p` starts fullscreen playback, `s` toggles
+its local stream, `n` saves a snapshot, `x` stops playback, Esc goes back,
+`r` refreshes, and `q` quits. Scriptable commands are:
 
 ```text
 patvs controller receivers

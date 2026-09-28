@@ -318,3 +318,14 @@ Acceptance targets on a healthy small LAN:
   six daemons were left running on the final build. Raspberry Pi output,
   physical visual confirmation, reboots, camera removal, and latency
   measurements remain outstanding.
+
+### 2026-09-29 — controller keyboard handling
+
+- Replaced the line scanner and direct terminal clearing with Bubble Tea.
+  Discovery and status requests remain asynchronous; arrow keys or `j`/`k`
+  select rows, and single keys operate the selected emitter. Refreshes can no
+  longer erase a partly typed command because the controller uses key events.
+- The selected row stays with the same device ID when discovery updates
+  reorder peers. The screen also shows camera errors and last-seen times.
+- Updated the README with the controller keys. The CLI commands and wire
+  protocol remain unchanged.
