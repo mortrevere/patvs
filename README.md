@@ -33,6 +33,10 @@ build metadata can be supplied without editing source:
 VERSION=0.1.0 SEEDS=receiver.example.net:7411 ./scripts/build.sh
 ```
 
+Run the freshly built x64 controller from this checkout with
+`./dist/patvs-linux-amd64 controller`. The build does not replace a separate
+`patvs` command already on your `PATH`.
+
 ## Run
 
 ```sh

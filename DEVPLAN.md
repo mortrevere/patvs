@@ -370,3 +370,15 @@ Acceptance targets on a healthy small LAN:
   status APIs respond. Blue restored its Black-camera VLC playback and kept
   receiving frames with the explicit stream flag disabled; Red and Black have
   no active playback or streaming emitters.
+
+### 2026-09-29 — refresh field and controller binaries
+
+- A controller launched as `patvs controller` still showed the older `s`
+  stream toggle because the `dist/` binary had not been rebuilt after the TUI
+  change. A standalone Blue-camera stream on Red was stopped through the CLI.
+- Rebuilt all three `dist/` targets from commit `3053a08`. Replaced and
+  restarted both emitter and receiver processes on Blue, Red, and Black with
+  the same x64 binary. All six running executable hashes match
+  `fdb55ea30c1b2a01b52d20b178d55d80b266dfae38edb28cefe01685b4a8761f`,
+  and all receivers see all three emitters online. Run the controller from
+  `./dist/patvs-linux-amd64 controller` in this checkout to use the new keys.
