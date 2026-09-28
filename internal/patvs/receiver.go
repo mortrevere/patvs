@@ -487,12 +487,17 @@ func (r *receiver) saveSnapshot(id string, frame []byte) (string, error) {
 func (r *receiver) startPlayer(id string) error {
 	r.stopPlayer()
 	url := "http://" + r.cfg.StreamAddr + "/streams/" + id + ".mjpg"
-	args := []string{"--fullscreen", "--no-video-title-show", "--network-caching=150", "--no-audio", url}
+	args := []string{"--intf=dummy", "--fullscreen", "--no-video-title-show", "--network-caching=150", "--no-audio", url}
 	if os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
-		if _, err := os.Stat("/dev/dri/card0"); err == nil {
+		_, drmErr := os.Stat("/dev/dri/card0")
+		_, fbErr := os.Stat("/dev/fb0")
+		switch {
+		case drmErr == nil && fbErr == nil:
+			args = append([]string{"--vout=drm_vout,fb", "--no-fb-tty", "--fbdev=/dev/fb0"}, args...)
+		case drmErr == nil:
 			args = append([]string{"--vout=drm_vout"}, args...)
-		} else if _, err := os.Stat("/dev/fb0"); err == nil {
-			args = append([]string{"--vout=fb"}, args...)
+		case fbErr == nil:
+			args = append([]string{"--vout=fb", "--no-fb-tty", "--fbdev=/dev/fb0"}, args...)
 		}
 	}
 	cmd := exec.Command(r.cfg.Player, args...)

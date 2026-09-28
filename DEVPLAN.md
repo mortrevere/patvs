@@ -290,3 +290,31 @@ Acceptance targets on a healthy small LAN:
   emitter. Together with malformed-frame, wrong-secret, seed, and namespace
   tests, the automated adverse-network matrix is complete.
 - Remaining acceptance requires Raspberry Pi devices and real display outputs.
+
+### 2026-09-29 — three-laptop LAN field test
+
+- Deployed the static amd64 binary to `blue`, `red`, and `black`, all running
+  NixOS 25.11 on Linux 7.1.1. Each host ran an emitter and receiver from
+  `/tmp/patvs-field`; temporary Nix shells supplied FFmpeg, V4L2 utilities,
+  and VLC.
+- NixOS initially blocked TCP 7411 and UDP 7412. After adding temporary,
+  port-specific firewall rules, an unseeded controller on `blue` discovered
+  all three receivers and every receiver registered all three emitters. A
+  controller in WSL used the three DNS names as seeds because WSL does not
+  share the physical LAN broadcast domain.
+- `blue` and `black` automatically selected `/dev/video0`, native MJPEG at
+  640x480 and 30 fps. Cross-host snapshots succeeded from `black` to `blue`
+  and `red`, and from `blue` to `black`. A live `black` to `blue` stream
+  delivered 757,760 bytes in three seconds.
+- `red` exposes 32 Intel IPU6 nodes but none reports a usable V4L2 capture
+  format. Its emitter remains connected with a 0x0 camera profile and keeps
+  retrying; IPU6/libcamera support remains a separate compatibility task.
+- Real VLC testing found two headless-launch issues. VLC now uses its dummy
+  interface so closed daemon stdin cannot terminate it, and headless playback
+  requests the native `drm_vout,fb` fallback chain with framebuffer TTY
+  handling disabled. On `black`, the framebuffer probe initialized at
+  1920x1080 and supervised playback remained alive with a player PID.
+- The temporary playback and stream requests were stopped after testing. All
+  six daemons were left running on the final build. Raspberry Pi output,
+  physical visual confirmation, reboots, camera removal, and latency
+  measurements remain outstanding.
