@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -177,7 +178,10 @@ func runEmitterSession(ctx context.Context, cfg Config, identity Identity, manag
 func connectEmitter(ctx context.Context, cfg Config, identity Identity, manager *captureManager, peer ReceiverInfo, hints chan<- ReceiverInfo) error {
 	endpoint := url.URL{Scheme: "ws", Host: peer.Address, Path: "/v1/session"}
 	header := http.Header{"Authorization": []string{"Bearer " + cfg.Secret}}
-	conn, response, err := websocket.DefaultDialer.DialContext(ctx, endpoint.String(), header)
+	dialer := *websocket.DefaultDialer
+	dialer.HandshakeTimeout = 3 * time.Second
+	dialer.NetDialContext = (&net.Dialer{Timeout: 2 * time.Second, KeepAlive: 15 * time.Second}).DialContext
+	conn, response, err := dialer.DialContext(ctx, endpoint.String(), header)
 	if err != nil {
 		if response != nil {
 			return fmt.Errorf("connect to %s: %s", peer.Address, response.Status)

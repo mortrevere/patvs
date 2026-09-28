@@ -91,6 +91,14 @@ Run the synthetic end-to-end check on a Linux development machine with FFmpeg:
 ./scripts/integration-test.sh
 ```
 
+On Linux hosts that permit unprivileged network namespaces, the network test
+disables UDP discovery by using mismatched ports, verifies bounded `/24`
+fallback, changes the receiver address, and checks reconnection:
+
+```sh
+./scripts/network-test.sh
+```
+
 The default ports are TCP 7411 for the receiver API and emitter sessions, UDP
 7412 for discovery, and loopback TCP 7413 for received MJPEG streams. State is
 stored below `$XDG_STATE_HOME/patvs` or `~/.local/state/patvs`; emitter and

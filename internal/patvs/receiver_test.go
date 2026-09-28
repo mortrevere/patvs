@@ -81,6 +81,25 @@ func TestEmitterSessionDropsMalformedFrame(t *testing.T) {
 	}
 }
 
+func TestEmitterSessionReceivesRoutableReceiverHints(t *testing.T) {
+	r := testReceiver()
+	r.peers["remote"] = ReceiverInfo{ID: "remote", Name: "remote", Address: "10.80.0.4:7411"}
+	server := httptest.NewServer(r.apiHandler())
+	defer server.Close()
+	conn := dialTestSession(t, server.URL, "secret")
+	defer conn.Close()
+	if err := conn.WriteJSON(sessionMessage{Type: "register", ID: "camera", Name: "camera"}); err != nil {
+		t.Fatal(err)
+	}
+	var demand sessionMessage
+	if err := conn.ReadJSON(&demand); err != nil {
+		t.Fatal(err)
+	}
+	if len(demand.Receivers) != 1 || demand.Receivers[0].ID != "remote" || demand.Receivers[0].Address != "10.80.0.4:7411" {
+		t.Fatalf("unexpected receiver hints: %#v", demand.Receivers)
+	}
+}
+
 func testReceiver() *receiver {
 	return &receiver{
 		cfg: Config{Secret: "secret"},

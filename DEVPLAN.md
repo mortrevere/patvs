@@ -143,7 +143,7 @@ Acceptance:
 
 - [x] Automate two synthetic emitters and multiple receivers through discovery,
       auth, routing, snapshots, fan-out, restart, and reconnection.
-- [ ] Test malformed protocol limits, wrong secrets, changing addresses,
+- [x] Test malformed protocol limits, wrong secrets, changing addresses,
       multicast filtering, seed exchange, and bounded subnet probing.
 - [ ] Perform two-Pi and three-device field tests across Wi-Fi, a DHCP-free
       Ethernet switch, reboots, camera removal, and route changes.
@@ -275,3 +275,18 @@ Acceptance targets on a healthy small LAN:
 - Corrected automatic mode ranking so meeting the 640x480 minimum takes
   precedence over compressed format; among suitable modes MJPEG remains
   preferred. Added a regression test and repeated all cross-build checks.
+
+### 2026-09-29 — isolated network fallback
+
+- Added `scripts/network-test.sh`, which creates two unprivileged network
+  namespaces joined by a veth pair. Mismatched UDP ports suppress normal
+  discovery, proving the bounded `/24` health probe finds the receiver.
+- The test removes receiver address `10.55.0.1`, adds `10.55.0.3`, restarts the
+  receiver, and verifies the emitter reconnects in 9 seconds.
+- Found and fixed Gorilla's long default handshake delay on stale addresses;
+  emitter TCP connection attempts now time out after two seconds and WebSocket
+  handshakes after three seconds.
+- Added a session test proving verified routable receiver hints are sent to an
+  emitter. Together with malformed-frame, wrong-secret, seed, and namespace
+  tests, the automated adverse-network matrix is complete.
+- Remaining acceptance requires Raspberry Pi devices and real display outputs.
