@@ -272,3 +272,6 @@ Acceptance targets on a healthy small LAN:
 - Added live WebSocket tests proving malformed registration closes the session
   and malformed binary frames are dropped while later heartbeats still work.
   `go test -race ./...` and the full integration harness pass.
+- Corrected automatic mode ranking so meeting the 640x480 minimum takes
+  precedence over compressed format; among suitable modes MJPEG remains
+  preferred. Added a regression test and repeated all cross-build checks.

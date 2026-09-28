@@ -43,14 +43,14 @@ func selectCamera(ctx context.Context, requested string) (Camera, error) {
 		return Camera{}, fmt.Errorf("no usable V4L2 capture device found")
 	}
 	sort.SliceStable(choices, func(i, j int) bool {
-		iMJPEG, jMJPEG := choices[i].Format == "mjpeg", choices[j].Format == "mjpeg"
-		if iMJPEG != jMJPEG {
-			return iMJPEG
-		}
 		iMeets := choices[i].Width >= 640 && choices[i].Height >= 480
 		jMeets := choices[j].Width >= 640 && choices[j].Height >= 480
 		if iMeets != jMeets {
 			return iMeets
+		}
+		iMJPEG, jMJPEG := choices[i].Format == "mjpeg", choices[j].Format == "mjpeg"
+		if iMJPEG != jMJPEG {
+			return iMJPEG
 		}
 		iArea, jArea := choices[i].Width*choices[i].Height, choices[j].Width*choices[j].Height
 		if iMeets && iArea != jArea {
@@ -107,7 +107,7 @@ func parseCameraFormats(path, text string) (Camera, error) {
 		meets := width >= 640 && height >= 480
 		score := int64(width * height)
 		if meets {
-			score = 1_000_000_000 - score
+			score = 4_000_000_000 - score
 		}
 		if format == "mjpeg" {
 			score += 2_000_000_000

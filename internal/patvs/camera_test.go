@@ -28,6 +28,24 @@ func TestParseCameraFormatsPrefersSmallestSuitableMJPEG(t *testing.T) {
 	}
 }
 
+func TestParseCameraFormatsMeetsMinimumBeforePreferringMJPEG(t *testing.T) {
+	listing := `Device Caps      : 0x04200001
+        Video Capture
+    [0]: 'MJPG' (Motion-JPEG, compressed)
+        Size: Discrete 320x240
+            Interval: Discrete 0.033s (30.000 fps)
+    [1]: 'YUYV' (YUYV 4:2:2)
+        Size: Discrete 640x480
+            Interval: Discrete 0.033s (30.000 fps)`
+	camera, err := parseCameraFormats("/dev/video0", listing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if camera.Format != "yuyv" || camera.Width != 640 || camera.Height != 480 {
+		t.Fatalf("selected %#v", camera)
+	}
+}
+
 func TestReadJPEGFrames(t *testing.T) {
 	input := []byte{1, 2, 0xff, 0xd8, 3, 4, 0xff, 0xd9, 9, 0xff, 0xd8, 5, 0xff, 0xd9}
 	var frames [][]byte
