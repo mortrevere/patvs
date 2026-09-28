@@ -13,6 +13,7 @@ import (
 
 type tuiTick time.Time
 type tuiPeers []ReceiverInfo
+type tuiHints []ReceiverInfo
 type tuiStatus struct {
 	receiverID string
 	status     ReceiverStatus
@@ -35,15 +36,49 @@ type tuiModel struct {
 	peersFetching  bool
 	statusFetching bool
 	working        bool
+	scanEvents     chan privateScanUpdate
+	scan           privateScanUpdate
 }
 
 func newTUI(ctx context.Context, client controllerClient) *tea.Program {
-	model := &tuiModel{ctx: ctx, client: client, message: "Discovering receivers…", peersFetching: true}
+	model := &tuiModel{
+		ctx: ctx, client: client, message: "Discovering receivers…",
+		peersFetching: true, scanEvents: make(chan privateScanUpdate, 32),
+		scan: privateScanUpdate{Phase: "starting", Prefix: "10.0.0.0/24"},
+	}
 	return tea.NewProgram(model, tea.WithAltScreen(), tea.WithContext(ctx))
 }
 
 func (m *tuiModel) Init() tea.Cmd {
-	return tea.Batch(m.fetchPeers(), tuiTimer())
+	go scanPrivate(m.ctx, apiPort(m.client.cfg.APIAddr), func(update privateScanUpdate) {
+		if update.Peer == nil {
+			select {
+			case m.scanEvents <- update:
+			default:
+			}
+			return
+		}
+		select {
+		case m.scanEvents <- update:
+		case <-m.ctx.Done():
+		}
+	})
+	return tea.Batch(m.fetchPeers(), tuiTimer(), m.nextScanEvent())
+}
+
+func (m *tuiModel) nextScanEvent() tea.Cmd {
+	return func() tea.Msg {
+		select {
+		case update := <-m.scanEvents:
+			return update
+		case <-m.ctx.Done():
+			return nil
+		}
+	}
+}
+
+func (m *tuiModel) fetchHints(peer ReceiverInfo) tea.Cmd {
+	return func() tea.Msg { return tuiHints(m.client.expandHints(m.ctx, []ReceiverInfo{peer})) }
 }
 
 func tuiTimer() tea.Cmd {
@@ -106,27 +141,21 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(commands...)
 	case tuiPeers:
 		m.peersFetching = false
-		previousID := ""
-		if m.peerIndex < len(m.peers) {
-			previousID = m.peers[m.peerIndex].ID
-		}
-		m.peers = []ReceiverInfo(msg)
-		for i, peer := range m.peers {
-			if peer.ID == previousID {
-				m.peerIndex = i
-			}
-			if peer.ID == m.selected.ID {
-				m.selected = peer
-			}
-		}
-		if m.peerIndex >= len(m.peers) {
-			m.peerIndex = max(0, len(m.peers)-1)
-		}
+		m.mergePeers([]ReceiverInfo(msg))
 		if m.selected.ID == "" && len(m.peers) == 0 {
 			m.message = "No receivers found yet; checking again…"
 		} else if m.selected.ID == "" {
 			m.message = "Select a receiver"
 		}
+	case tuiHints:
+		m.mergePeers([]ReceiverInfo(msg))
+	case privateScanUpdate:
+		m.scan = msg
+		if msg.Peer != nil {
+			m.mergePeers([]ReceiverInfo{*msg.Peer})
+			return m, tea.Batch(m.nextScanEvent(), m.fetchHints(*msg.Peer))
+		}
+		return m, m.nextScanEvent()
 	case tuiStatus:
 		if msg.receiverID != m.selected.ID {
 			return m, nil
@@ -294,5 +323,45 @@ func (m *tuiModel) View() string {
 		view.WriteString("\n↑/↓ select · p play · s stream on/off · n snapshot · x stop playback\nEsc back · r refresh · q quit\n")
 	}
 	fmt.Fprintf(&view, "\n%s\n", m.message)
+	if m.scan.Done {
+		fmt.Fprintf(&view, "RFC1918 scan complete: %d / %d addresses\n", m.scan.Checked, privateScanTotal)
+	} else {
+		fmt.Fprintf(&view, "RFC1918 scan %s: %d / %d probes · %s · %d receivers\n",
+			m.scan.Phase, m.scan.Checked, privateScanTotal, m.scan.Prefix, len(m.peers))
+	}
 	return view.String()
+}
+
+func (m *tuiModel) mergePeers(incoming []ReceiverInfo) {
+	selectedID := ""
+	if m.peerIndex < len(m.peers) {
+		selectedID = m.peers[m.peerIndex].ID
+	}
+	known := make(map[string]ReceiverInfo, len(m.peers)+len(incoming))
+	for _, peer := range m.peers {
+		known[peer.ID] = peer
+	}
+	for _, peer := range incoming {
+		old, exists := known[peer.ID]
+		if !exists || routableEndpoint(peer.Address) && !routableEndpoint(old.Address) ||
+			peer.LastSeen.After(old.LastSeen) && routableEndpoint(peer.Address) == routableEndpoint(old.Address) {
+			known[peer.ID] = peer
+		}
+	}
+	m.peers = m.peers[:0]
+	for _, peer := range known {
+		m.peers = append(m.peers, peer)
+	}
+	sort.Slice(m.peers, func(i, j int) bool { return m.peers[i].Name < m.peers[j].Name })
+	for i, peer := range m.peers {
+		if peer.ID == selectedID {
+			m.peerIndex = i
+		}
+		if peer.ID == m.selected.ID {
+			m.selected = peer
+		}
+	}
+	if m.peerIndex >= len(m.peers) {
+		m.peerIndex = max(0, len(m.peers)-1)
+	}
 }

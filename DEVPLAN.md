@@ -333,3 +333,17 @@ Acceptance targets on a healthy small LAN:
   discovery readers could still send after the shared result channel closed.
   Discovery now waits for both readers to exit before returning, so result
   closure cannot race an active sender.
+
+### 2026-09-29 — blind private-network controller scan
+
+- Added a controller-only RFC1918 probe pool: 256 concurrent workers, at most
+  512 new TCP probes per second, and a 500 ms per-host HTTP limit. It starts
+  with common private `/24`s, samples likely host addresses across the rest,
+  then covers every remaining host address. The TUI reports phase, current
+  subnet, completed probes, and discovered receivers.
+- One-shot controller commands scan in parallel with UDP discovery for three
+  seconds. From WSL, `patvs controller receivers` found `blue`, `red`, and
+  `black` at `10.0.0.30`, `.19`, and `.29` without seeds in 2.9 seconds.
+- This is a progressive search over 17,891,328 private addresses; uncommon
+  subnets can take much longer. The scan still requires IP routing and an
+  open receiver TCP port. It does not implement NAT traversal.

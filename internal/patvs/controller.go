@@ -27,10 +27,7 @@ func RunController(ctx context.Context, cfg Config) error {
 	command := cfg.Args[0]
 	args := cfg.Args[1:]
 	if command == "receivers" {
-		peers, err := discover(ctx, cfg, 3*time.Second)
-		if err != nil {
-			return err
-		}
+		peers := client.findReceivers(ctx, 3*time.Second)
 		peers = client.expandHints(ctx, peers)
 		sort.Slice(peers, func(i, j int) bool { return peers[i].Name < peers[j].Name })
 		return printValue(cfg.JSON, peers)
@@ -110,7 +107,7 @@ func (c controllerClient) resolveReceiver(ctx context.Context, selector string) 
 			return peer, nil
 		}
 	}
-	peers, _ := discover(ctx, c.cfg, 3*time.Second)
+	peers := c.findReceivers(ctx, 3*time.Second)
 	peers = c.expandHints(ctx, peers)
 	var matches []ReceiverInfo
 	for _, peer := range peers {
@@ -232,7 +229,9 @@ func (c controllerClient) request(ctx context.Context, peer ReceiverInfo, method
 }
 
 func (c controllerClient) runTUI(ctx context.Context) error {
-	_, err := newTUI(ctx, c).Run()
+	tuiCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	_, err := newTUI(tuiCtx, c).Run()
 	return err
 }
 

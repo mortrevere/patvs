@@ -10,10 +10,14 @@ emitter, receiver, or controller.
 - FFmpeg and `v4l2-ctl` on emitters
 - VLC on receivers that drive a screen
 
-The daemons discover receivers automatically on connected LANs. Routed
-networks require at least one receiver seed compiled into the binary or passed
-with `--seeds`. Internet relays and NAT traversal are planned after the local
-network implementation.
+The daemons discover receivers automatically on connected LANs. The controller
+also probes RFC1918 private addresses, so it can find routed private LANs even
+when local broadcast does not reach them. It checks common `/24` networks
+first, then samples and eventually covers the remaining private addresses in
+parallel at a capped 512 probes per second. The TUI shows scan progress;
+scanning all private addresses can take hours. Seeds remain useful for faster
+discovery on unusual subnets. Internet relays and NAT traversal are planned
+after the local network implementation.
 
 ## Build
 
@@ -45,7 +49,8 @@ The controller starts its interactive terminal interface when no command is
 given. Use ↑/↓ or `j`/`k` to select a receiver, Enter to open it, and the
 same keys to select an emitter. `p` starts fullscreen playback, `s` toggles
 its local stream, `n` saves a snapshot, `x` stops playback, Esc goes back,
-`r` refreshes, and `q` quits. Scriptable commands are:
+`r` refreshes, and `q` quits. The scan status stays visible at the bottom.
+Scriptable commands are:
 
 ```text
 patvs controller receivers
