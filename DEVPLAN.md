@@ -47,11 +47,11 @@ Acceptance:
       link-local multicast interface; receivers answer by unicast.
 - [x] Include loopback discovery for colocated processes and refresh promptly
       when interfaces or addresses change.
-- [ ] Add bounded direct IPv4 probing after multicast/broadcast discovery,
+- [x] Add bounded direct IPv4 probing after multicast/broadcast discovery,
       prioritizing remembered addresses and the local `/24`.
 - [x] Add build-time and runtime receiver seeds; receivers share verified,
       routable receiver hints.
-- [ ] Deduplicate by persistent device ID, never by address.
+- [x] Deduplicate by persistent device ID, never by address.
 
 Acceptance:
 
@@ -141,7 +141,7 @@ Acceptance:
 
 ## Milestone 7: integration and field acceptance
 
-- [ ] Automate two synthetic emitters and multiple receivers through discovery,
+- [x] Automate two synthetic emitters and multiple receivers through discovery,
       auth, routing, snapshots, fan-out, restart, and reconnection.
 - [ ] Test malformed protocol limits, wrong secrets, changing addresses,
       multicast filtering, seed exchange, and bounded subnet probing.
@@ -221,3 +221,17 @@ Acceptance targets on a healthy small LAN:
   delays capped at five attempts; stop and a new play command reset the budget.
 - Next action: test two-receiver fan-out and receiver restart restoration, then
   validate desktop and DRM/KMS playback on Raspberry Pi hardware.
+
+### 2026-09-29 — remembered receivers and two-receiver recovery
+
+- Migrated emitter state from a flat identity to identity plus receiver records;
+  old state files keep their ID. Remembered addresses are probed immediately
+  as seeds before delayed `/24` scanning.
+- Expanded the integration harness to two receivers. Both synthetic emitters
+  register with both receivers, snapshots retain their colours, and one source
+  streams concurrently through both receiver loopback endpoints.
+- The harness restarts the red emitter without seed arguments and verifies it
+  reconnects to both remembered receivers. It then restarts one receiver and
+  confirms persisted stream intent is still enabled.
+- Next action: make TUI refresh non-blocking, test malformed protocol limits,
+  and exercise fullscreen playback restoration with a controllable fake VLC.

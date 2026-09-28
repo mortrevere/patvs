@@ -14,14 +14,34 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+type emitterDiskState struct {
+	Identity  Identity                `json:"identity"`
+	Receivers map[string]ReceiverInfo `json:"receivers,omitempty"`
+}
+
 func RunEmitter(ctx context.Context, cfg Config) error {
-	identity, err := loadIdentity(cfg.StatePath, cfg.Name)
-	if err != nil {
+	var state emitterDiskState
+	if err := loadJSON(cfg.StatePath, &state); err != nil {
 		return err
 	}
-	if err := saveJSON(cfg.StatePath, identity); err != nil {
+	if state.Identity.ID == "" {
+		identity, err := loadIdentity(cfg.StatePath, cfg.Name)
+		if err != nil {
+			return err
+		}
+		state.Identity = identity
+	}
+	state.Identity.Name = cfg.Name
+	if state.Receivers == nil {
+		state.Receivers = make(map[string]ReceiverInfo)
+	}
+	for _, peer := range state.Receivers {
+		cfg.Seeds = appendUnique(cfg.Seeds, peer.Address)
+	}
+	if err := saveJSON(cfg.StatePath, state); err != nil {
 		return err
 	}
+	identity := state.Identity
 	camera, err := selectCamera(ctx, cfg.Camera)
 	if err != nil {
 		slog.Warn("camera is unavailable; discovery will continue", "error", err)
@@ -41,6 +61,16 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 
 	discoverNow := make(chan struct{}, 1)
 	discoverNow <- struct{}{}
+	remember := func(peer ReceiverInfo) {
+		old, exists := state.Receivers[peer.ID]
+		if exists && old.Address == peer.Address && old.Name == peer.Name {
+			return
+		}
+		state.Receivers[peer.ID] = peer
+		if err := saveJSON(cfg.StatePath, state); err != nil {
+			slog.Warn("save remembered receiver", "error", err)
+		}
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -57,6 +87,7 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 			default:
 			}
 		case peer := <-hints:
+			remember(peer)
 			mu.Lock()
 			_, found := active[peer.ID]
 			if !found {
@@ -79,6 +110,7 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 		case <-discoverNow:
 			peers, _ := discover(ctx, cfg, 2200*time.Millisecond)
 			for _, peer := range peers {
+				remember(peer)
 				mu.Lock()
 				_, found := active[peer.ID]
 				if found {
@@ -105,6 +137,18 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 			}
 		}
 	}
+}
+
+func appendUnique(values []string, value string) []string {
+	if value == "" {
+		return values
+	}
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
 
 func runEmitterSession(ctx context.Context, cfg Config, identity Identity, manager *captureManager, peer ReceiverInfo, hints chan<- ReceiverInfo) {

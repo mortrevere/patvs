@@ -106,6 +106,11 @@ func RunController(ctx context.Context, cfg Config) error {
 }
 
 func (c controllerClient) resolveReceiver(ctx context.Context, selector string) (ReceiverInfo, error) {
+	if strings.Contains(selector, ":") {
+		if peer, ok := probeReceiver(ctx, &c.http, selector); ok {
+			return peer, nil
+		}
+	}
 	peers, _ := discover(ctx, c.cfg, 3*time.Second)
 	peers = c.expandHints(ctx, peers)
 	var matches []ReceiverInfo

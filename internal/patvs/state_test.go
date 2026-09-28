@@ -63,3 +63,25 @@ func TestRemoveSnapshotWaiter(t *testing.T) {
 		t.Fatal("timed-out snapshot waiter was retained")
 	}
 }
+
+func TestLegacyEmitterIdentityCanMigrate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "emitter.json")
+	legacy := Identity{ID: "legacy-id", Name: "old-name"}
+	if err := saveJSON(path, legacy); err != nil {
+		t.Fatal(err)
+	}
+	var state emitterDiskState
+	if err := loadJSON(path, &state); err != nil {
+		t.Fatal(err)
+	}
+	if state.Identity.ID != "" {
+		t.Fatal("legacy flat identity unexpectedly decoded as nested state")
+	}
+	identity, err := loadIdentity(path, "new-name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity.ID != legacy.ID || identity.Name != "new-name" {
+		t.Fatalf("migration produced %#v", identity)
+	}
+}
