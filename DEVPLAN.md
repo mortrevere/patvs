@@ -382,3 +382,14 @@ Acceptance targets on a healthy small LAN:
   `fdb55ea30c1b2a01b52d20b178d55d80b266dfae38edb28cefe01685b4a8761f`,
   and all receivers see all three emitters online. Run the controller from
   `./dist/patvs-linux-amd64 controller` in this checkout to use the new keys.
+
+### 2026-09-29 — receiver list shows active source
+
+- The controller's receiver list now reads each discovered receiver's status
+  in parallel and refreshes it every few seconds. Rows show the active emitter
+  name and whether VLC is playing it, or `waiting`/`idle` when appropriate.
+  Status fetches continue after the operator stops network discovery with `k`.
+- Rebuilt x64, ARM64, and ARMv7 distribution binaries. Restarted both daemons
+  on Blue, Red, and Black with the x64 build; all six running images match
+  `42a576e57d20bf8c5c02f473887ac61ab510a0615ad2de949b5396a9668ab193`.
+  All three receivers report all three emitters online.

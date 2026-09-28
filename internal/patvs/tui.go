@@ -19,6 +19,7 @@ type tuiStatus struct {
 	status     ReceiverStatus
 	err        error
 }
+type tuiPeerStatus tuiStatus
 type tuiAction struct {
 	receiverID string
 	message    string
@@ -31,6 +32,10 @@ type tuiModel struct {
 	client         controllerClient
 	peers          []ReceiverInfo
 	peerIndex      int
+	overview       map[string]ReceiverStatus
+	overviewFailed map[string]bool
+	overviewBusy   map[string]bool
+	overviewAt     map[string]time.Time
 	selected       ReceiverInfo
 	status         ReceiverStatus
 	emitterIndex   int
@@ -49,7 +54,9 @@ func newTUI(ctx context.Context, client controllerClient) *tea.Program {
 		ctx: ctx, scanCtx: scanCtx, stopScan: stopScan,
 		client: client, message: "Discovering receivers…",
 		peersFetching: true, scanEvents: make(chan privateScanUpdate, 32),
-		scan: privateScanUpdate{Phase: "starting", Prefix: "10.0.0.0/24"},
+		scan:     privateScanUpdate{Phase: "starting", Prefix: "10.0.0.0/24"},
+		overview: make(map[string]ReceiverStatus), overviewFailed: make(map[string]bool),
+		overviewBusy: make(map[string]bool), overviewAt: make(map[string]time.Time),
 	}
 	return tea.NewProgram(model, tea.WithAltScreen(), tea.WithContext(ctx))
 }
@@ -111,6 +118,31 @@ func (m *tuiModel) fetchStatus() tea.Cmd {
 	}
 }
 
+func (m *tuiModel) fetchPeerStatus(peer ReceiverInfo) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(m.ctx, 3*time.Second)
+		defer cancel()
+		var status ReceiverStatus
+		err := m.client.request(ctx, peer, http.MethodGet, "/v1/status", nil, &status)
+		return tuiPeerStatus{receiverID: peer.ID, status: status, err: err}
+	}
+}
+
+func (m *tuiModel) refreshOverview(force bool) tea.Cmd {
+	var commands []tea.Cmd
+	for _, peer := range m.peers {
+		if m.overviewBusy[peer.ID] || !force && time.Since(m.overviewAt[peer.ID]) < 5*time.Second {
+			continue
+		}
+		m.overviewBusy[peer.ID] = true
+		commands = append(commands, m.fetchPeerStatus(peer))
+	}
+	if len(commands) == 0 {
+		return nil
+	}
+	return tea.Batch(commands...)
+}
+
 func (m *tuiModel) action(command, emitterID string) tea.Cmd {
 	peer := m.selected
 	return func() tea.Msg {
@@ -136,6 +168,9 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
 	case tuiTick:
 		commands := []tea.Cmd{tuiTimer()}
+		if command := m.refreshOverview(false); command != nil {
+			commands = append(commands, command)
+		}
 		if !m.scanStopped && !m.peersFetching {
 			m.peersFetching = true
 			commands = append(commands, m.fetchPeers(m.scanCtx))
@@ -148,16 +183,17 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tuiPeers:
 		m.peersFetching = false
 		m.mergePeers([]ReceiverInfo(msg))
-		if m.scanStopped {
-			break
+		if !m.scanStopped {
+			if m.selected.ID == "" && len(m.peers) == 0 {
+				m.message = "No receivers found yet; checking again…"
+			} else if m.selected.ID == "" {
+				m.message = "Select a receiver"
+			}
 		}
-		if m.selected.ID == "" && len(m.peers) == 0 {
-			m.message = "No receivers found yet; checking again…"
-		} else if m.selected.ID == "" {
-			m.message = "Select a receiver"
-		}
+		return m, m.refreshOverview(false)
 	case tuiHints:
 		m.mergePeers([]ReceiverInfo(msg))
+		return m, m.refreshOverview(false)
 	case privateScanUpdate:
 		if m.scanStopped {
 			return m, nil
@@ -165,15 +201,26 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.scan = msg
 		if msg.Peer != nil {
 			m.mergePeers([]ReceiverInfo{*msg.Peer})
-			return m, tea.Batch(m.nextScanEvent(), m.fetchHints(*msg.Peer))
+			return m, tea.Batch(m.nextScanEvent(), m.fetchHints(*msg.Peer), m.refreshOverview(false))
 		}
 		return m, m.nextScanEvent()
+	case tuiPeerStatus:
+		m.overviewBusy[msg.receiverID] = false
+		m.overviewAt[msg.receiverID] = time.Now()
+		m.overviewFailed[msg.receiverID] = msg.err != nil
+		if msg.err == nil {
+			m.overview[msg.receiverID] = msg.status
+		} else {
+			delete(m.overview, msg.receiverID)
+		}
 	case tuiStatus:
 		if msg.receiverID != m.selected.ID {
 			return m, nil
 		}
 		m.statusFetching = false
 		if msg.err != nil {
+			m.overviewFailed[msg.receiverID] = true
+			delete(m.overview, msg.receiverID)
 			m.message = "Error: " + msg.err.Error()
 			return m, nil
 		}
@@ -183,6 +230,9 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			previousID = old[m.emitterIndex].ID
 		}
 		m.status = msg.status
+		m.overview[msg.receiverID] = msg.status
+		m.overviewAt[msg.receiverID] = time.Now()
+		m.overviewFailed[msg.receiverID] = false
 		if m.message == "Loading…" || strings.HasPrefix(m.message, "Error: ") {
 			m.message = "Ready"
 		}
@@ -278,10 +328,13 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.selected.ID == "" && !m.peersFetching {
 				m.peersFetching = true
+				var peers tea.Cmd
 				if m.scanStopped {
-					return m, m.fetchPeers(m.ctx)
+					peers = m.fetchPeers(m.ctx)
+				} else {
+					peers = m.fetchPeers(m.scanCtx)
 				}
-				return m, m.fetchPeers(m.scanCtx)
+				return m, tea.Batch(peers, m.refreshOverview(true))
 			}
 		}
 	}
@@ -297,7 +350,13 @@ func (m *tuiModel) View() string {
 			if i == m.peerIndex {
 				cursor = "> "
 			}
-			fmt.Fprintf(&view, "%s%-20s %s\n", cursor, peer.Name, peer.Address)
+			summary := "checking…"
+			if m.overviewFailed[peer.ID] {
+				summary = "status unavailable"
+			} else if status, ok := m.overview[peer.ID]; ok {
+				summary = receiverFeedSummary(status)
+			}
+			fmt.Fprintf(&view, "%s%-20s %-21s %s\n", cursor, peer.Name, peer.Address, summary)
 		}
 		if len(m.peers) == 0 {
 			if m.scanStopped {
@@ -350,6 +409,48 @@ func (m *tuiModel) View() string {
 			m.scan.Phase, m.scan.Checked, privateScanTotal, m.scan.Prefix, len(m.peers))
 	}
 	return view.String()
+}
+
+func receiverFeedSummary(status ReceiverStatus) string {
+	active := make([]string, 0, 1)
+	waiting := make([]string, 0, 1)
+	ids := make(map[string]bool)
+	if status.Playback != "" {
+		ids[status.Playback] = true
+	}
+	for id, enabled := range status.Streams {
+		if enabled {
+			ids[id] = true
+		}
+	}
+	for id := range ids {
+		emitter := status.Emitters[id]
+		name := emitter.Name
+		if name == "" {
+			name = id
+		}
+		if emitter.Streaming {
+			if status.Playback == id && status.PlayerPID != 0 {
+				name += " (VLC)"
+			}
+			active = append(active, name)
+		} else {
+			waiting = append(waiting, name)
+		}
+	}
+	sort.Strings(active)
+	sort.Strings(waiting)
+	if len(active) == 0 && len(waiting) == 0 {
+		return "idle"
+	}
+	parts := make([]string, 0, 2)
+	if len(active) != 0 {
+		parts = append(parts, "← "+strings.Join(active, ", "))
+	}
+	if len(waiting) != 0 {
+		parts = append(parts, "waiting: "+strings.Join(waiting, ", "))
+	}
+	return strings.Join(parts, " · ")
 }
 
 func (m *tuiModel) mergePeers(incoming []ReceiverInfo) {

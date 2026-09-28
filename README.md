@@ -50,11 +50,12 @@ custom shared value for an installation. Run any mode with `-h` for common
 options.
 
 The controller starts its interactive terminal interface when no command is
-given. Use ↑/↓ to select a receiver, Enter to open it, and ↑/↓ to select an
-emitter. Enter starts its feed and fullscreen VLC playback; `n` saves a
-snapshot, `x` stops VLC and its feed, Esc goes back, `k` stops background
-discovery, `r` refreshes once, and `q` quits. The scan status stays visible
-at the bottom.
+given. The receiver list shows each receiver's current feed and source, or
+`idle` when nothing is playing. Use ↑/↓ to select a receiver, Enter to open it,
+and ↑/↓ to select an emitter. Enter starts its feed and fullscreen VLC
+playback; `n` saves a snapshot, `x` stops VLC and its feed, Esc goes back, and
+`k` stops background discovery. `r` refreshes once; `q` quits. The scan status
+stays visible at the bottom.
 Scriptable commands are:
 
 ```text
