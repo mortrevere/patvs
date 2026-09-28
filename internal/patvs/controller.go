@@ -32,6 +32,7 @@ func RunController(ctx context.Context, cfg Config) error {
 		if err != nil {
 			return err
 		}
+		peers = client.expandHints(ctx, peers)
 		sort.Slice(peers, func(i, j int) bool { return peers[i].Name < peers[j].Name })
 		return printValue(cfg.JSON, peers)
 	}
@@ -106,6 +107,7 @@ func RunController(ctx context.Context, cfg Config) error {
 
 func (c controllerClient) resolveReceiver(ctx context.Context, selector string) (ReceiverInfo, error) {
 	peers, _ := discover(ctx, c.cfg, 3*time.Second)
+	peers = c.expandHints(ctx, peers)
 	var matches []ReceiverInfo
 	for _, peer := range peers {
 		if peer.ID == selector || peer.Name == selector || peer.Address == selector || strings.HasPrefix(peer.ID, selector) {
@@ -136,6 +138,38 @@ func (c controllerClient) resolveReceiver(ctx context.Context, selector string) 
 		return ReceiverInfo{}, fmt.Errorf("%q is not a patvs receiver", selector)
 	}
 	return ReceiverInfo{ID: identity.ID, Name: identity.Name, Address: address, LastSeen: time.Now()}, nil
+}
+
+func (c controllerClient) expandHints(ctx context.Context, peers []ReceiverInfo) []ReceiverInfo {
+	known := make(map[string]ReceiverInfo, len(peers))
+	queue := append([]ReceiverInfo(nil), peers...)
+	for _, peer := range peers {
+		known[peer.ID] = peer
+	}
+	for len(queue) > 0 && len(known) < 64 {
+		peer := queue[0]
+		queue = queue[1:]
+		var status ReceiverStatus
+		if c.request(ctx, peer, http.MethodGet, "/v1/status", nil, &status) != nil {
+			continue
+		}
+		for _, hint := range status.Receivers {
+			if _, exists := known[hint.ID]; exists || !routableEndpoint(hint.Address) {
+				continue
+			}
+			verified, ok := probeReceiver(ctx, &c.http, hint.Address)
+			if !ok || verified.ID != hint.ID {
+				continue
+			}
+			known[verified.ID] = verified
+			queue = append(queue, verified)
+		}
+	}
+	result := make([]ReceiverInfo, 0, len(known))
+	for _, peer := range known {
+		result = append(result, peer)
+	}
+	return result
 }
 
 func (c controllerClient) resolveEmitter(ctx context.Context, peer ReceiverInfo, selector string) (string, error) {

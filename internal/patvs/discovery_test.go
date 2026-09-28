@@ -28,3 +28,16 @@ func TestProbeReceiverRejectsUnrelatedHTTP(t *testing.T) {
 		t.Fatal("accepted response without a patvs receiver ID")
 	}
 }
+
+func TestRoutableEndpoint(t *testing.T) {
+	for endpoint, want := range map[string]bool{
+		"192.168.1.20:7411":     true,
+		"receiver.example:7411": true,
+		"127.0.0.1:7411":        false,
+		"[fe80::1%eth0]:7411":   false,
+	} {
+		if got := routableEndpoint(endpoint); got != want {
+			t.Errorf("routableEndpoint(%q) = %t, want %t", endpoint, got, want)
+		}
+	}
+}

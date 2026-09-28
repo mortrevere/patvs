@@ -50,11 +50,12 @@ type ReceiverStatus struct {
 }
 
 type sessionMessage struct {
-	Type    string `json:"type"`
-	ID      string `json:"id,omitempty"`
-	Name    string `json:"name,omitempty"`
-	Camera  Camera `json:"camera,omitempty"`
-	Error   string `json:"error,omitempty"`
-	Stream  bool   `json:"stream,omitempty"`
-	Request string `json:"request,omitempty"`
+	Type      string         `json:"type"`
+	ID        string         `json:"id,omitempty"`
+	Name      string         `json:"name,omitempty"`
+	Camera    Camera         `json:"camera,omitempty"`
+	Error     string         `json:"error,omitempty"`
+	Stream    bool           `json:"stream,omitempty"`
+	Request   string         `json:"request,omitempty"`
+	Receivers []ReceiverInfo `json:"receivers,omitempty"`
 }

@@ -48,6 +48,7 @@ type receiver struct {
 	latest    map[string][]byte
 	waiters   map[string][]chan []byte
 	listeners map[string]map[chan []byte]struct{}
+	peers     map[string]ReceiverInfo
 	player    *exec.Cmd
 	playerErr string
 	dirty     bool
@@ -56,7 +57,7 @@ type receiver struct {
 func RunReceiver(ctx context.Context, cfg Config) error {
 	r := &receiver{
 		cfg: cfg, sessions: make(map[string]*emitterSession), latest: make(map[string][]byte),
-		waiters: make(map[string][]chan []byte), listeners: make(map[string]map[chan []byte]struct{}),
+		waiters: make(map[string][]chan []byte), listeners: make(map[string]map[chan []byte]struct{}), peers: make(map[string]ReceiverInfo),
 	}
 	if err := loadJSON(cfg.StatePath, &r.state); err != nil {
 		return err
@@ -93,6 +94,7 @@ func RunReceiver(ctx context.Context, cfg Config) error {
 	go func() { errorsCh <- normalizeServerError(api.ListenAndServe()) }()
 	go func() { errorsCh <- normalizeServerError(stream.ListenAndServe()) }()
 	go r.maintenance(ctx)
+	go r.discoverPeers(ctx)
 
 	slog.Info("receiver ready", "id", r.state.Identity.ID, "api", cfg.APIAddr, "streams", cfg.StreamAddr)
 	select {
@@ -141,7 +143,7 @@ func (r *receiver) auth(next http.Handler) http.Handler {
 
 func (r *receiver) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	r.mu.RLock()
-	status := ReceiverStatus{Identity: r.state.Identity, Emitters: cloneEmitters(r.state.Emitters), Streams: cloneBools(r.state.Streams), Playback: r.state.Playback, PlayerErr: r.playerErr}
+	status := ReceiverStatus{Identity: r.state.Identity, Emitters: cloneEmitters(r.state.Emitters), Streams: cloneBools(r.state.Streams), Playback: r.state.Playback, PlayerErr: r.playerErr, Receivers: r.receiverHintsLocked()}
 	if r.player != nil && r.player.Process != nil {
 		status.PlayerPID = r.player.Process.Pid
 	}
@@ -284,7 +286,10 @@ func (r *receiver) handleSession(w http.ResponseWriter, request *http.Request) {
 	wantPlayback := r.state.Playback == register.ID
 	r.dirty = true
 	r.mu.Unlock()
-	_ = session.send(sessionMessage{Type: "demand", Stream: wantStream || wantPlayback})
+	r.mu.RLock()
+	hints := r.receiverHintsLocked()
+	r.mu.RUnlock()
+	_ = session.send(sessionMessage{Type: "demand", Stream: wantStream || wantPlayback, Receivers: hints})
 	if wantPlayback {
 		_ = r.startPlayer(register.ID)
 	}
@@ -515,12 +520,48 @@ func (r *receiver) maintenance(ctx context.Context) {
 				}
 			}
 			dirty := r.dirty
+			sessions := make([]*emitterSession, 0, len(r.sessions))
+			for _, session := range r.sessions {
+				sessions = append(sessions, session)
+			}
+			hints := r.receiverHintsLocked()
 			r.mu.Unlock()
+			for _, session := range sessions {
+				_ = session.send(sessionMessage{Type: "peers", Receivers: hints})
+			}
 			if dirty {
 				_ = r.save()
 			}
 		}
 	}
+}
+
+func (r *receiver) discoverPeers(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		peers, _ := discover(ctx, r.cfg, 3*time.Second)
+		r.mu.Lock()
+		for _, peer := range peers {
+			if peer.ID != r.state.Identity.ID && routableEndpoint(peer.Address) {
+				r.peers[peer.ID] = peer
+			}
+		}
+		r.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (r *receiver) receiverHintsLocked() []ReceiverInfo {
+	result := make([]ReceiverInfo, 0, len(r.peers))
+	for _, peer := range r.peers {
+		result = append(result, peer)
+	}
+	return result
 }
 
 func (r *receiver) save() error {

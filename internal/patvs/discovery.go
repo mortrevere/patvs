@@ -352,3 +352,16 @@ func apiPort(address string) int {
 	port, _ := strconv.Atoi(portText)
 	return port
 }
+
+func routableEndpoint(endpoint string) bool {
+	host, _, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		return false
+	}
+	host = strings.Split(host, "%")[0]
+	address, err := netip.ParseAddr(host)
+	if err != nil {
+		return true
+	}
+	return !address.IsLoopback() && !address.IsLinkLocalUnicast() && !address.IsUnspecified()
+}

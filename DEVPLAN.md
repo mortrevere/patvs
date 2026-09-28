@@ -49,7 +49,7 @@ Acceptance:
       when interfaces or addresses change.
 - [ ] Add bounded direct IPv4 probing after multicast/broadcast discovery,
       prioritizing remembered addresses and the local `/24`.
-- [ ] Add build-time and runtime receiver seeds; receivers share verified,
+- [x] Add build-time and runtime receiver seeds; receivers share verified,
       routable receiver hints.
 - [ ] Deduplicate by persistent device ID, never by address.
 
@@ -202,3 +202,14 @@ Acceptance targets on a healthy small LAN:
   and confirms that a wrong shared secret is rejected. The test passes.
 - Next action: exchange verified receiver hints for routed networks, exercise
   state restoration across receiver restart, and add bounded VLC retry tests.
+
+### 2026-09-29 — routed receiver hints
+
+- Receivers now discover other receivers and expose only routable peer hints.
+  They send the same hints to connected emitters over authenticated sessions.
+- Emitters deduplicate hints by receiver ID and establish independent sessions;
+  controllers recursively query and identity-check hints before presenting
+  them.
+- Unit, vet, and synthetic end-to-end checks pass after the change.
+- Next action: extend the integration harness to two receivers, test persisted
+  stream restoration after restart, and add bounded VLC retry behavior.

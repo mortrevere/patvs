@@ -28,6 +28,7 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 		camera = Camera{Device: cfg.Camera}
 	}
 	manager := newCaptureManager(cfg, camera)
+	hints := make(chan ReceiverInfo, 32)
 	type activeSession struct {
 		address string
 		cancel  context.CancelFunc
@@ -55,6 +56,26 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 			case discoverNow <- struct{}{}:
 			default:
 			}
+		case peer := <-hints:
+			mu.Lock()
+			_, found := active[peer.ID]
+			if !found {
+				sessionCtx, cancel := context.WithCancel(ctx)
+				active[peer.ID] = activeSession{address: peer.Address, cancel: cancel}
+				wg.Add(1)
+				go func(peer ReceiverInfo) {
+					defer wg.Done()
+					runEmitterSession(sessionCtx, cfg, identity, manager, peer, hints)
+					mu.Lock()
+					delete(active, peer.ID)
+					mu.Unlock()
+					select {
+					case discoverNow <- struct{}{}:
+					default:
+					}
+				}(peer)
+			}
+			mu.Unlock()
 		case <-discoverNow:
 			peers, _ := discover(ctx, cfg, 2200*time.Millisecond)
 			for _, peer := range peers {
@@ -70,7 +91,7 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 				wg.Add(1)
 				go func(peer ReceiverInfo) {
 					defer wg.Done()
-					runEmitterSession(sessionCtx, cfg, identity, manager, peer)
+					runEmitterSession(sessionCtx, cfg, identity, manager, peer, hints)
 					mu.Lock()
 					if current, ok := active[peer.ID]; ok && current.address == peer.Address {
 						delete(active, peer.ID)
@@ -86,10 +107,10 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 	}
 }
 
-func runEmitterSession(ctx context.Context, cfg Config, identity Identity, manager *captureManager, peer ReceiverInfo) {
+func runEmitterSession(ctx context.Context, cfg Config, identity Identity, manager *captureManager, peer ReceiverInfo, hints chan<- ReceiverInfo) {
 	delay := 250 * time.Millisecond
 	for attempt := 0; ctx.Err() == nil && attempt < 3; attempt++ {
-		err := connectEmitter(ctx, cfg, identity, manager, peer)
+		err := connectEmitter(ctx, cfg, identity, manager, peer, hints)
 		if ctx.Err() != nil {
 			return
 		}
@@ -109,7 +130,7 @@ func runEmitterSession(ctx context.Context, cfg Config, identity Identity, manag
 	}
 }
 
-func connectEmitter(ctx context.Context, cfg Config, identity Identity, manager *captureManager, peer ReceiverInfo) error {
+func connectEmitter(ctx context.Context, cfg Config, identity Identity, manager *captureManager, peer ReceiverInfo, hints chan<- ReceiverInfo) error {
 	endpoint := url.URL{Scheme: "ws", Host: peer.Address, Path: "/v1/session"}
 	header := http.Header{"Authorization": []string{"Bearer " + cfg.Secret}}
 	conn, response, err := websocket.DefaultDialer.DialContext(ctx, endpoint.String(), header)
@@ -153,6 +174,15 @@ func connectEmitter(ctx context.Context, cfg Config, identity Identity, manager 
 		case err := <-readErr:
 			return err
 		case command := <-commands:
+			for _, hintedPeer := range command.Receivers {
+				if hintedPeer.ID == "" || hintedPeer.ID == peer.ID || !routableEndpoint(hintedPeer.Address) {
+					continue
+				}
+				select {
+				case hints <- hintedPeer:
+				default:
+				}
+			}
 			switch command.Type {
 			case "demand":
 				streaming = command.Stream
