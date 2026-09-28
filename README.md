@@ -1,0 +1,68 @@
+# patvs
+
+Portable All Terrain Video Streaming routes Linux camera feeds between
+unattended machines on an installation network. One executable runs as an
+emitter, receiver, or controller.
+
+## Runtime requirements
+
+- Linux on x86-64, ARM64, or ARMv7
+- FFmpeg and `v4l2-ctl` on emitters
+- VLC on receivers that drive a screen
+
+The daemons discover receivers automatically on connected LANs. Routed
+networks require at least one receiver seed compiled into the binary or passed
+with `--seeds`. Internet relays and NAT traversal are planned after the local
+network implementation.
+
+## Build
+
+```sh
+go test ./...
+./scripts/build.sh
+```
+
+The build creates static Linux binaries and checksums under `dist/`. Optional
+build metadata can be supplied without editing source:
+
+```sh
+VERSION=0.1.0 SEEDS=receiver.example.net:7411 ./scripts/build.sh
+```
+
+## Run
+
+```sh
+patvs receiver --secret installation-secret
+patvs emitter --secret installation-secret
+patvs controller --secret installation-secret
+```
+
+`--secret` defaults to `patvs` for immediate setup on a trusted LAN. Use a
+custom shared value for an installation. Run any mode with `-h` for common
+options.
+
+The controller starts its interactive terminal interface when no command is
+given. Scriptable commands are:
+
+```text
+patvs controller receivers
+patvs controller status <receiver>
+patvs controller emitters <receiver>
+patvs controller snapshot <receiver> <emitter>
+patvs controller stream <receiver> <emitter> start|stop
+patvs controller play <receiver> <emitter>
+patvs controller stop <receiver>
+```
+
+Names, full IDs, unambiguous ID prefixes, and receiver addresses are accepted.
+Add `--json` before the command for machine-readable output. For repeatable
+video tests, an emitter can use an FFmpeg source such as
+`--camera 'lavfi:color=c=red:s=640x480:r=25'`.
+
+The default ports are TCP 7411 for the receiver API and emitter sessions, UDP
+7412 for discovery, and loopback TCP 7413 for received MJPEG streams. State is
+stored below `$XDG_STATE_HOME/patvs` or `~/.local/state/patvs`; emitter and
+receiver modes use separate files and can run together.
+
+See [DEVPLAN.md](DEVPLAN.md) for milestones, acceptance criteria, and current
+implementation status.
