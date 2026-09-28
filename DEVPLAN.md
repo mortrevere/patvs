@@ -122,7 +122,7 @@ Acceptance:
 
 ## Milestone 6: playback and unattended startup
 
-- [ ] Supervise one VLC process started by patvs; start, replace, stop, and
+- [x] Supervise one VLC process started by patvs; start, replace, stop, and
       bounded-retry it without touching unrelated VLC processes.
 - [ ] Prefer the active X11/Wayland session, then try installed DRM/KMS output,
       then framebuffer output when available.
@@ -213,3 +213,11 @@ Acceptance targets on a healthy small LAN:
 - Unit, vet, and synthetic end-to-end checks pass after the change.
 - Next action: extend the integration harness to two receivers, test persisted
   stream restoration after restart, and add bounded VLC retry behavior.
+
+### 2026-09-29 — receiver lifecycle hardening
+
+- Timed-out and cancelled snapshot requests now remove their waiter channels.
+- Receiver-owned VLC playback now retries unexpected exits with exponential
+  delays capped at five attempts; stop and a new play command reset the budget.
+- Next action: test two-receiver fan-out and receiver restart restoration, then
+  validate desktop and DRM/KMS playback on Raspberry Pi hardware.

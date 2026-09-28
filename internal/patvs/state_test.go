@@ -41,3 +41,25 @@ func TestReceiverHandlersConstructAndRejectInvalidStreamPath(t *testing.T) {
 		t.Fatalf("got status %d, want %d", response.Code, http.StatusNotFound)
 	}
 }
+
+func TestPlayerRetriesAreBounded(t *testing.T) {
+	r := &receiver{}
+	for range 10 {
+		r.schedulePlayerRetryLocked()
+	}
+	if r.playerTry != 5 {
+		t.Fatalf("got %d retry attempts, want 5", r.playerTry)
+	}
+	if r.playerAt.IsZero() {
+		t.Fatal("retry deadline was not set")
+	}
+}
+
+func TestRemoveSnapshotWaiter(t *testing.T) {
+	waiter := make(chan []byte, 1)
+	r := &receiver{waiters: map[string][]chan []byte{"camera": {waiter}}}
+	r.removeWaiter("camera", waiter)
+	if _, exists := r.waiters["camera"]; exists {
+		t.Fatal("timed-out snapshot waiter was retained")
+	}
+}

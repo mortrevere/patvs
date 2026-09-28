@@ -51,6 +51,8 @@ type receiver struct {
 	peers     map[string]ReceiverInfo
 	player    *exec.Cmd
 	playerErr string
+	playerTry int
+	playerAt  time.Time
 	dirty     bool
 }
 
@@ -198,6 +200,7 @@ func (r *receiver) handleSnapshot(w http.ResponseWriter, request *http.Request) 
 		http.Error(w, "emitter is offline", http.StatusServiceUnavailable)
 		return
 	}
+	defer r.removeWaiter(id, result)
 	if err := session.send(sessionMessage{Type: "snapshot", Request: fmt.Sprintf("%d", time.Now().UnixNano())}); err != nil {
 		http.Error(w, "request snapshot: "+err.Error(), http.StatusBadGateway)
 		return
@@ -220,6 +223,8 @@ func (r *receiver) handlePlayback(w http.ResponseWriter, request *http.Request) 
 	if request.Method == http.MethodDelete {
 		r.mu.Lock()
 		r.state.Playback = ""
+		r.playerTry = 0
+		r.playerErr = ""
 		r.dirty = true
 		r.mu.Unlock()
 		r.stopPlayer()
@@ -238,6 +243,8 @@ func (r *receiver) handlePlayback(w http.ResponseWriter, request *http.Request) 
 	if known {
 		r.state.Playback = body.EmitterID
 		r.state.Streams[body.EmitterID] = true
+		r.playerTry = 0
+		r.playerAt = time.Time{}
 		r.dirty = true
 	}
 	session := r.sessions[body.EmitterID]
@@ -370,6 +377,23 @@ func (r *receiver) acceptFrame(id string, data []byte) {
 	}
 }
 
+func (r *receiver) removeWaiter(id string, target chan []byte) {
+	r.mu.Lock()
+	waiters := r.waiters[id]
+	for index, waiter := range waiters {
+		if waiter == target {
+			waiters = append(waiters[:index], waiters[index+1:]...)
+			break
+		}
+	}
+	if len(waiters) == 0 {
+		delete(r.waiters, id)
+	} else {
+		r.waiters[id] = waiters
+	}
+	r.mu.Unlock()
+}
+
 func (r *receiver) streamHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /streams/", r.handleMJPEG)
@@ -472,11 +496,13 @@ func (r *receiver) startPlayer(id string) error {
 	if err := cmd.Start(); err != nil {
 		r.mu.Lock()
 		r.playerErr = err.Error()
+		r.schedulePlayerRetryLocked()
 		r.mu.Unlock()
 		return fmt.Errorf("start VLC: %w", err)
 	}
 	r.mu.Lock()
 	r.player, r.playerErr = cmd, ""
+	r.playerAt = time.Time{}
 	r.mu.Unlock()
 	go func() {
 		err := cmd.Wait()
@@ -485,11 +511,25 @@ func (r *receiver) startPlayer(id string) error {
 			r.player = nil
 			if err != nil {
 				r.playerErr = err.Error()
+			} else {
+				r.playerErr = "player exited"
+			}
+			if r.state.Playback != "" {
+				r.schedulePlayerRetryLocked()
 			}
 		}
 		r.mu.Unlock()
 	}()
 	return nil
+}
+
+func (r *receiver) schedulePlayerRetryLocked() {
+	if r.playerTry >= 5 {
+		return
+	}
+	r.playerTry++
+	delay := time.Second << min(r.playerTry-1, 4)
+	r.playerAt = time.Now().Add(delay)
 }
 
 func (r *receiver) stopPlayer() {
@@ -520,12 +560,17 @@ func (r *receiver) maintenance(ctx context.Context) {
 				}
 			}
 			dirty := r.dirty
+			retryPlayback := r.state.Playback
+			retryPlayer := retryPlayback != "" && r.player == nil && r.playerTry > 0 && r.playerTry < 5 && !time.Now().Before(r.playerAt)
 			sessions := make([]*emitterSession, 0, len(r.sessions))
 			for _, session := range r.sessions {
 				sessions = append(sessions, session)
 			}
 			hints := r.receiverHintsLocked()
 			r.mu.Unlock()
+			if retryPlayer {
+				_ = r.startPlayer(retryPlayback)
+			}
 			for _, session := range sessions {
 				_ = session.send(sessionMessage{Type: "peers", Receivers: hints})
 			}
