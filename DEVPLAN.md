@@ -258,3 +258,17 @@ Acceptance targets on a healthy small LAN:
   DRM/KMS when available, then framebuffer output.
 - Next action: add malformed WebSocket and address-change cases, then move to
   Raspberry Pi field acceptance for the actual VLC display paths.
+
+### 2026-09-29 — attached V4L2 camera path
+
+- Ran the current patvs receiver, emitter, and controller with the USB/IP
+  webcam attached to WSL. Automatic selection chose `/dev/video0`, native
+  MJPEG, 640x480, and the camera's supported 30 fps input rate.
+- Requested a snapshot through the controller and receiver session. `ffprobe`
+  confirmed the saved image is MJPEG at 640x480; temporary daemons were then
+  stopped cleanly.
+- Raspberry Pi display hardware remains required for HDMI/composite and
+  camera-to-screen latency acceptance.
+- Added live WebSocket tests proving malformed registration closes the session
+  and malformed binary frames are dropped while later heartbeats still work.
+  `go test -race ./...` and the full integration harness pass.

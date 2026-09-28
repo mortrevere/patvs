@@ -5,6 +5,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 func TestReceiverAPIRejectsWrongSecret(t *testing.T) {
@@ -23,6 +26,89 @@ func TestReceiverAPIRejectsWrongSecret(t *testing.T) {
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("got status %d, want %d", response.Code, http.StatusUnauthorized)
 	}
+}
+
+func TestEmitterSessionRejectsMalformedRegistration(t *testing.T) {
+	r := testReceiver()
+	server := httptest.NewServer(r.apiHandler())
+	defer server.Close()
+	conn := dialTestSession(t, server.URL, "secret")
+	defer conn.Close()
+	if err := conn.WriteJSON(sessionMessage{Type: "heartbeat", ID: "not-registered"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+	if _, _, err := conn.ReadMessage(); err == nil {
+		t.Fatal("session remained open after malformed registration")
+	}
+}
+
+func TestEmitterSessionDropsMalformedFrame(t *testing.T) {
+	r := testReceiver()
+	server := httptest.NewServer(r.apiHandler())
+	defer server.Close()
+	conn := dialTestSession(t, server.URL, "secret")
+	defer conn.Close()
+	if err := conn.WriteJSON(sessionMessage{Type: "register", ID: "camera", Name: "camera"}); err != nil {
+		t.Fatal(err)
+	}
+	var demand sessionMessage
+	if err := conn.ReadJSON(&demand); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.WriteMessage(websocket.BinaryMessage, []byte("not a JPEG")); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.WriteJSON(sessionMessage{Type: "heartbeat"}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		r.mu.RLock()
+		seen := !r.state.Emitters["camera"].LastSeen.IsZero()
+		_, stored := r.latest["camera"]
+		r.mu.RUnlock()
+		if seen {
+			if stored {
+				t.Fatal("receiver stored malformed binary frame")
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("receiver did not process heartbeat after malformed frame")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func testReceiver() *receiver {
+	return &receiver{
+		cfg: Config{Secret: "secret"},
+		state: receiverDiskState{
+			Identity: Identity{ID: "receiver", Name: "receiver"},
+			Emitters: make(map[string]EmitterInfo),
+			Streams:  make(map[string]bool),
+		},
+		sessions:  make(map[string]*emitterSession),
+		latest:    make(map[string][]byte),
+		waiters:   make(map[string][]chan []byte),
+		listeners: make(map[string]map[chan []byte]struct{}),
+		peers:     make(map[string]ReceiverInfo),
+	}
+}
+
+func dialTestSession(t *testing.T, serverURL, secret string) *websocket.Conn {
+	t.Helper()
+	header := http.Header{"Authorization": []string{"Bearer " + secret}}
+	url := "ws" + strings.TrimPrefix(serverURL, "http") + "/v1/session"
+	conn, response, err := websocket.DefaultDialer.Dial(url, header)
+	if err != nil {
+		if response != nil {
+			t.Fatalf("dial session: %s: %v", response.Status, err)
+		}
+		t.Fatal(err)
+	}
+	return conn
 }
 
 func TestReceiverAPIRejectsOversizedJSON(t *testing.T) {
