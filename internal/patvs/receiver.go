@@ -172,8 +172,14 @@ func (r *receiver) handleStreamIntent(w http.ResponseWriter, request *http.Reque
 	_, known := r.state.Emitters[id]
 	if known {
 		r.state.Streams[id] = body.Enabled
+		if !body.Enabled && r.state.Playback != id {
+			emitter := r.state.Emitters[id]
+			emitter.Streaming = false
+			r.state.Emitters[id] = emitter
+		}
 		r.dirty = true
 	}
+	wantStream := body.Enabled || r.state.Playback == id
 	session := r.sessions[id]
 	r.mu.Unlock()
 	if !known {
@@ -181,7 +187,7 @@ func (r *receiver) handleStreamIntent(w http.ResponseWriter, request *http.Reque
 		return
 	}
 	if session != nil {
-		_ = session.send(sessionMessage{Type: "demand", Stream: body.Enabled})
+		_ = session.send(sessionMessage{Type: "demand", Stream: wantStream})
 	}
 	_ = r.save()
 	writeJSON(w, map[string]bool{"enabled": body.Enabled})
@@ -222,12 +228,22 @@ func (r *receiver) handleSnapshot(w http.ResponseWriter, request *http.Request) 
 func (r *receiver) handlePlayback(w http.ResponseWriter, request *http.Request) {
 	if request.Method == http.MethodDelete {
 		r.mu.Lock()
+		old := r.state.Playback
 		r.state.Playback = ""
+		delete(r.state.Streams, old)
+		if emitter, ok := r.state.Emitters[old]; ok {
+			emitter.Streaming = false
+			r.state.Emitters[old] = emitter
+		}
+		session := r.sessions[old]
 		r.playerTry = 0
 		r.playerErr = ""
 		r.dirty = true
 		r.mu.Unlock()
 		r.stopPlayer()
+		if session != nil {
+			_ = session.send(sessionMessage{Type: "demand", Stream: false})
+		}
 		_ = r.save()
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -240,18 +256,28 @@ func (r *receiver) handlePlayback(w http.ResponseWriter, request *http.Request) 
 	}
 	r.mu.Lock()
 	_, known := r.state.Emitters[body.EmitterID]
+	old := r.state.Playback
 	if known {
 		r.state.Playback = body.EmitterID
-		r.state.Streams[body.EmitterID] = true
+		if old != "" && old != body.EmitterID {
+			delete(r.state.Streams, old)
+			emitter := r.state.Emitters[old]
+			emitter.Streaming = false
+			r.state.Emitters[old] = emitter
+		}
 		r.playerTry = 0
 		r.playerAt = time.Time{}
 		r.dirty = true
 	}
 	session := r.sessions[body.EmitterID]
+	oldSession := r.sessions[old]
 	r.mu.Unlock()
 	if !known {
 		http.Error(w, "unknown emitter", http.StatusNotFound)
 		return
+	}
+	if old != body.EmitterID && oldSession != nil {
+		_ = oldSession.send(sessionMessage{Type: "demand", Stream: false})
 	}
 	if session != nil {
 		_ = session.send(sessionMessage{Type: "demand", Stream: true})

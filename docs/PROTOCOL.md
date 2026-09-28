@@ -12,6 +12,12 @@ patvs version 1 uses three network surfaces:
   control data. Each binary message is one complete JPEG frame, limited to 8
   MiB. A receiver keeps only the newest frame per stream consumer.
 
+`PUT /v1/playback` selects one emitter for local VLC playback and requests its
+feed. `DELETE /v1/playback` stops VLC and releases that feed; selecting another
+emitter releases the previous one. `PUT /v1/streams/{id}` is a separate intent
+for clients reading the receiver's loopback MJPEG socket directly. Disabling
+that intent does not interrupt an active VLC selection.
+
 The persistent ID identifies a device. Addresses are replaceable connection
 candidates and must never become database keys. Messages are versioned at the
 discovery boundary; incompatible protocol versions are ignored.

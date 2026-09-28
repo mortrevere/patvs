@@ -47,8 +47,8 @@ options.
 
 The controller starts its interactive terminal interface when no command is
 given. Use ↑/↓ to select a receiver, Enter to open it, and ↑/↓ to select an
-emitter. `p` starts fullscreen playback, `s` toggles its local stream, `n`
-saves a snapshot, `x` stops playback, Esc goes back, `k` stops background
+emitter. Enter starts its feed and fullscreen VLC playback; `n` saves a
+snapshot, `x` stops VLC and its feed, Esc goes back, `k` stops background
 discovery, `r` refreshes once, and `q` quits. The scan status stays visible
 at the bottom.
 Scriptable commands are:
@@ -62,6 +62,10 @@ patvs controller stream <receiver> <emitter> start|stop
 patvs controller play <receiver> <emitter>
 patvs controller stop <receiver>
 ```
+
+The `stream` command is for clients that consume the receiver's loopback
+MJPEG socket directly. VLC playback starts its own feed and stopping it
+releases that feed.
 
 Names, full IDs, unambiguous ID prefixes, and receiver addresses are accepted.
 Add `--json` before the command for machine-readable output. For repeatable

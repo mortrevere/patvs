@@ -354,3 +354,19 @@ Acceptance targets on a healthy small LAN:
   periodic LAN discovery, retaining the receivers already found. Selected
   receiver status keeps refreshing. `r` still performs one explicit discovery
   refresh after the scan has stopped.
+
+### 2026-09-29 — playback owns its feed
+
+- The TUI now selects a receiver, then uses Enter on an emitter to start
+  fullscreen VLC and its video feed together. `x` stops both. The separate
+  stream toggle is removed from the TUI; the CLI stream command remains for
+  clients reading the loopback MJPEG socket.
+- Receiver playback no longer creates a persistent stream intent. Stopping or
+  switching VLC clears the old source's stream intent and tells that emitter
+  to stop capture. A standalone stream request remains possible through the
+  CLI/API, and disabling one while VLC is playing cannot interrupt playback.
+- Built the x64 binary and deployed it to `blue`, `red`, and `black`. Restarted
+  their receivers, cleared legacy stream requests, and confirmed all three
+  status APIs respond. Blue restored its Black-camera VLC playback and kept
+  receiving frames with the explicit stream flag disabled; Red and Black have
+  no active playback or streaming emitters.

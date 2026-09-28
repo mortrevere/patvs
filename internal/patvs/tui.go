@@ -111,7 +111,7 @@ func (m *tuiModel) fetchStatus() tea.Cmd {
 	}
 }
 
-func (m *tuiModel) action(command, emitterID string, enabled bool) tea.Cmd {
+func (m *tuiModel) action(command, emitterID string) tea.Cmd {
 	peer := m.selected
 	return func() tea.Msg {
 		var err error
@@ -119,8 +119,6 @@ func (m *tuiModel) action(command, emitterID string, enabled bool) tea.Cmd {
 		switch command {
 		case "play":
 			err = m.client.request(m.ctx, peer, http.MethodPut, "/v1/playback", map[string]string{"emitter_id": emitterID}, nil)
-		case "stream":
-			err = m.client.request(m.ctx, peer, http.MethodPut, "/v1/streams/"+emitterID, map[string]bool{"enabled": enabled}, nil)
 		case "snapshot":
 			var result map[string]string
 			err = m.client.request(m.ctx, peer, http.MethodPost, "/v1/snapshots/"+emitterID, nil, &result)
@@ -238,8 +236,8 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.selected.ID != "" && m.emitterIndex+1 < len(m.status.Emitters) {
 				m.emitterIndex++
 			}
-		case "enter":
-			if m.selected.ID == "" && m.peerIndex < len(m.peers) {
+		case "enter", "p", "n", "x":
+			if m.selected.ID == "" && msg.String() == "enter" && m.peerIndex < len(m.peers) {
 				m.selected = m.peers[m.peerIndex]
 				m.status = ReceiverStatus{}
 				m.emitterIndex = 0
@@ -247,26 +245,13 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusFetching = true
 				return m, m.fetchStatus()
 			}
-		case "r":
-			if m.selected.ID != "" && !m.statusFetching {
-				m.statusFetching = true
-				return m, m.fetchStatus()
-			}
-			if m.selected.ID == "" && !m.peersFetching {
-				m.peersFetching = true
-				if m.scanStopped {
-					return m, m.fetchPeers(m.ctx)
-				}
-				return m, m.fetchPeers(m.scanCtx)
-			}
-		case "p", "s", "n", "x":
 			if m.selected.ID == "" || m.working {
 				break
 			}
 			if msg.String() == "x" {
 				m.working = true
 				m.message = "Stopping playback…"
-				return m, m.action("stop", "", false)
+				return m, m.action("stop", "")
 			}
 			emitters := sortedEmitters(m.status.Emitters)
 			if m.emitterIndex >= len(emitters) {
@@ -279,16 +264,24 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.working = true
 			switch msg.String() {
-			case "p":
+			case "enter", "p":
 				m.message = "Starting playback…"
-				return m, m.action("play", emitter.ID, false)
-			case "s":
-				enabled := !m.status.Streams[emitter.ID]
-				m.message = "Updating stream…"
-				return m, m.action("stream", emitter.ID, enabled)
+				return m, m.action("play", emitter.ID)
 			case "n":
 				m.message = "Taking snapshot…"
-				return m, m.action("snapshot", emitter.ID, false)
+				return m, m.action("snapshot", emitter.ID)
+			}
+		case "r":
+			if m.selected.ID != "" && !m.statusFetching {
+				m.statusFetching = true
+				return m, m.fetchStatus()
+			}
+			if m.selected.ID == "" && !m.peersFetching {
+				m.peersFetching = true
+				if m.scanStopped {
+					return m, m.fetchPeers(m.ctx)
+				}
+				return m, m.fetchPeers(m.scanCtx)
 			}
 		}
 	}
@@ -326,9 +319,6 @@ func (m *tuiModel) View() string {
 				state = "online"
 			}
 			flags := ""
-			if m.status.Streams[emitter.ID] {
-				flags += " stream"
-			}
 			if m.status.Playback == emitter.ID {
 				flags += " playing"
 			}
@@ -347,7 +337,7 @@ func (m *tuiModel) View() string {
 		if m.status.PlayerErr != "" {
 			fmt.Fprintf(&view, "\nPlayer error: %s\n", m.status.PlayerErr)
 		}
-		view.WriteString("\n↑/↓ select · p play · s stream on/off · n snapshot · x stop playback\nEsc back · k stop scan · r refresh · q quit\n")
+		view.WriteString("\n↑/↓ select · Enter play in VLC · n snapshot · x stop playback\nEsc back · k stop scan · r refresh · q quit\n")
 	}
 	fmt.Fprintf(&view, "\n%s\n", m.message)
 	if m.scanStopped {
