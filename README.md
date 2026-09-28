@@ -46,10 +46,11 @@ custom shared value for an installation. Run any mode with `-h` for common
 options.
 
 The controller starts its interactive terminal interface when no command is
-given. Use ↑/↓ or `j`/`k` to select a receiver, Enter to open it, and the
-same keys to select an emitter. `p` starts fullscreen playback, `s` toggles
-its local stream, `n` saves a snapshot, `x` stops playback, Esc goes back,
-`r` refreshes, and `q` quits. The scan status stays visible at the bottom.
+given. Use ↑/↓ to select a receiver, Enter to open it, and ↑/↓ to select an
+emitter. `p` starts fullscreen playback, `s` toggles its local stream, `n`
+saves a snapshot, `x` stops playback, Esc goes back, `k` stops background
+discovery, `r` refreshes once, and `q` quits. The scan status stays visible
+at the bottom.
 Scriptable commands are:
 
 ```text

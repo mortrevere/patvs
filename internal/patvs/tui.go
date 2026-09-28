@@ -26,6 +26,8 @@ type tuiAction struct {
 
 type tuiModel struct {
 	ctx            context.Context
+	scanCtx        context.Context
+	stopScan       context.CancelFunc
 	client         controllerClient
 	peers          []ReceiverInfo
 	peerIndex      int
@@ -38,11 +40,14 @@ type tuiModel struct {
 	working        bool
 	scanEvents     chan privateScanUpdate
 	scan           privateScanUpdate
+	scanStopped    bool
 }
 
 func newTUI(ctx context.Context, client controllerClient) *tea.Program {
+	scanCtx, stopScan := context.WithCancel(ctx)
 	model := &tuiModel{
-		ctx: ctx, client: client, message: "Discovering receivers…",
+		ctx: ctx, scanCtx: scanCtx, stopScan: stopScan,
+		client: client, message: "Discovering receivers…",
 		peersFetching: true, scanEvents: make(chan privateScanUpdate, 32),
 		scan: privateScanUpdate{Phase: "starting", Prefix: "10.0.0.0/24"},
 	}
@@ -50,45 +55,48 @@ func newTUI(ctx context.Context, client controllerClient) *tea.Program {
 }
 
 func (m *tuiModel) Init() tea.Cmd {
-	go scanPrivate(m.ctx, apiPort(m.client.cfg.APIAddr), func(update privateScanUpdate) {
+	scanCtx, events := m.scanCtx, m.scanEvents
+	go scanPrivate(scanCtx, apiPort(m.client.cfg.APIAddr), func(update privateScanUpdate) {
 		if update.Peer == nil {
 			select {
-			case m.scanEvents <- update:
+			case events <- update:
 			default:
 			}
 			return
 		}
 		select {
-		case m.scanEvents <- update:
-		case <-m.ctx.Done():
+		case events <- update:
+		case <-scanCtx.Done():
 		}
 	})
-	return tea.Batch(m.fetchPeers(), tuiTimer(), m.nextScanEvent())
+	return tea.Batch(m.fetchPeers(scanCtx), tuiTimer(), m.nextScanEvent())
 }
 
 func (m *tuiModel) nextScanEvent() tea.Cmd {
+	scanCtx, events := m.scanCtx, m.scanEvents
 	return func() tea.Msg {
 		select {
-		case update := <-m.scanEvents:
+		case update := <-events:
 			return update
-		case <-m.ctx.Done():
+		case <-scanCtx.Done():
 			return nil
 		}
 	}
 }
 
 func (m *tuiModel) fetchHints(peer ReceiverInfo) tea.Cmd {
-	return func() tea.Msg { return tuiHints(m.client.expandHints(m.ctx, []ReceiverInfo{peer})) }
+	scanCtx := m.scanCtx
+	return func() tea.Msg { return tuiHints(m.client.expandHints(scanCtx, []ReceiverInfo{peer})) }
 }
 
 func tuiTimer() tea.Cmd {
 	return tea.Tick(2*time.Second, func(at time.Time) tea.Msg { return tuiTick(at) })
 }
 
-func (m *tuiModel) fetchPeers() tea.Cmd {
+func (m *tuiModel) fetchPeers(ctx context.Context) tea.Cmd {
 	return func() tea.Msg {
-		peers, _ := discover(m.ctx, m.client.cfg, 2200*time.Millisecond)
-		peers = m.client.expandHints(m.ctx, peers)
+		peers, _ := discover(ctx, m.client.cfg, 2200*time.Millisecond)
+		peers = m.client.expandHints(ctx, peers)
 		sort.Slice(peers, func(i, j int) bool { return peers[i].Name < peers[j].Name })
 		return tuiPeers(peers)
 	}
@@ -130,9 +138,9 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
 	case tuiTick:
 		commands := []tea.Cmd{tuiTimer()}
-		if !m.peersFetching {
+		if !m.scanStopped && !m.peersFetching {
 			m.peersFetching = true
-			commands = append(commands, m.fetchPeers())
+			commands = append(commands, m.fetchPeers(m.scanCtx))
 		}
 		if m.selected.ID != "" && !m.statusFetching {
 			m.statusFetching = true
@@ -142,6 +150,9 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tuiPeers:
 		m.peersFetching = false
 		m.mergePeers([]ReceiverInfo(msg))
+		if m.scanStopped {
+			break
+		}
 		if m.selected.ID == "" && len(m.peers) == 0 {
 			m.message = "No receivers found yet; checking again…"
 		} else if m.selected.ID == "" {
@@ -150,6 +161,9 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tuiHints:
 		m.mergePeers([]ReceiverInfo(msg))
 	case privateScanUpdate:
+		if m.scanStopped {
+			return m, nil
+		}
 		m.scan = msg
 		if msg.Peer != nil {
 			m.mergePeers([]ReceiverInfo{*msg.Peer})
@@ -198,6 +212,12 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
+		case "k":
+			if !m.scanStopped {
+				m.scanStopped = true
+				m.stopScan()
+				m.message = "Discovery stopped; press r for a single refresh"
+			}
 		case "esc", "backspace":
 			if m.selected.ID != "" {
 				m.selected = ReceiverInfo{}
@@ -206,13 +226,13 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.working = false
 				m.message = "Select a receiver"
 			}
-		case "up", "k":
+		case "up":
 			if m.selected.ID == "" && m.peerIndex > 0 {
 				m.peerIndex--
 			} else if m.selected.ID != "" && m.emitterIndex > 0 {
 				m.emitterIndex--
 			}
-		case "down", "j":
+		case "down":
 			if m.selected.ID == "" && m.peerIndex+1 < len(m.peers) {
 				m.peerIndex++
 			} else if m.selected.ID != "" && m.emitterIndex+1 < len(m.status.Emitters) {
@@ -234,7 +254,10 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.selected.ID == "" && !m.peersFetching {
 				m.peersFetching = true
-				return m, m.fetchPeers()
+				if m.scanStopped {
+					return m, m.fetchPeers(m.ctx)
+				}
+				return m, m.fetchPeers(m.scanCtx)
 			}
 		case "p", "s", "n", "x":
 			if m.selected.ID == "" || m.working {
@@ -284,9 +307,13 @@ func (m *tuiModel) View() string {
 			fmt.Fprintf(&view, "%s%-20s %s\n", cursor, peer.Name, peer.Address)
 		}
 		if len(m.peers) == 0 {
-			view.WriteString("  Searching…\n")
+			if m.scanStopped {
+				view.WriteString("  No receivers discovered\n")
+			} else {
+				view.WriteString("  Searching…\n")
+			}
 		}
-		view.WriteString("\n↑/↓ or j/k select · Enter open · r refresh · q quit\n")
+		view.WriteString("\n↑/↓ select · Enter open · k stop scan · r refresh · q quit\n")
 	} else {
 		fmt.Fprintf(&view, "Receiver: %s (%s)\n\n", m.selected.Name, m.selected.Address)
 		emitters := sortedEmitters(m.status.Emitters)
@@ -320,10 +347,13 @@ func (m *tuiModel) View() string {
 		if m.status.PlayerErr != "" {
 			fmt.Fprintf(&view, "\nPlayer error: %s\n", m.status.PlayerErr)
 		}
-		view.WriteString("\n↑/↓ select · p play · s stream on/off · n snapshot · x stop playback\nEsc back · r refresh · q quit\n")
+		view.WriteString("\n↑/↓ select · p play · s stream on/off · n snapshot · x stop playback\nEsc back · k stop scan · r refresh · q quit\n")
 	}
 	fmt.Fprintf(&view, "\n%s\n", m.message)
-	if m.scan.Done {
+	if m.scanStopped {
+		fmt.Fprintf(&view, "RFC1918 scan stopped: %d / %d probes · %d receivers\n",
+			m.scan.Checked, privateScanTotal, len(m.peers))
+	} else if m.scan.Done {
 		fmt.Fprintf(&view, "RFC1918 scan complete: %d / %d addresses\n", m.scan.Checked, privateScanTotal)
 	} else {
 		fmt.Fprintf(&view, "RFC1918 scan %s: %d / %d probes · %s · %d receivers\n",

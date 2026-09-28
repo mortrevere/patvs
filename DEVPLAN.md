@@ -347,3 +347,10 @@ Acceptance targets on a healthy small LAN:
 - This is a progressive search over 17,891,328 private addresses; uncommon
   subnets can take much longer. The scan still requires IP routing and an
   open receiver TCP port. It does not implement NAT traversal.
+
+### 2026-09-29 — operator scan control
+
+- TUI selection uses arrow keys only. `k` cancels the RFC1918 scan and
+  periodic LAN discovery, retaining the receivers already found. Selected
+  receiver status keeps refreshing. `r` still performs one explicit discovery
+  refresh after the scan has stopped.
