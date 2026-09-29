@@ -396,6 +396,22 @@ func (m *tuiModel) View() string {
 		if m.status.PlayerErr != "" {
 			fmt.Fprintf(&view, "\nPlayer error: %s\n", m.status.PlayerErr)
 		}
+		view.WriteString("\nHost FFmpeg/VLC processes:\n")
+		if len(m.status.Processes) == 0 {
+			view.WriteString("  none\n")
+		}
+		for _, process := range m.status.Processes {
+			owned := ""
+			if process.PID == m.status.PlayerPID {
+				owned = " (patvs player)"
+			}
+			fmt.Fprintf(&view, "  %s pid=%d%s\n", process.Name, process.PID, owned)
+			command := []rune(process.Command)
+			if len(command) > 110 {
+				command = append(command[:109], '…')
+			}
+			fmt.Fprintf(&view, "    %s\n", string(command))
+		}
 		view.WriteString("\n↑/↓ select · Enter play in VLC · n snapshot · x stop playback\nEsc back · k stop scan · r refresh · q quit\n")
 	}
 	fmt.Fprintf(&view, "\n%s\n", m.message)

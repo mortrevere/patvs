@@ -404,3 +404,16 @@ Acceptance targets on a healthy small LAN:
   Blue and Black again advertise `/dev/video0` at 640x480 MJPEG/30 fps.
   Red's receiver reports active Black-camera frames for VLC. Red's own IPU6
   camera remains unavailable as before.
+
+### 2026-09-29 — inspect local media processes from controller
+
+- Receiver status now scans `/proc` for live FFmpeg and VLC processes and
+  includes their PIDs and command lines. The selected-receiver TUI screen
+  shows them, marking the VLC PID owned by that receiver. Nix's
+  `.vlc-wrapped` process is recognized by its `vlc` command line.
+- Rebuilt x64, ARM64, and ARMv7 binaries and restarted both daemons on Blue,
+  Red, and Black. All six running images match
+  `25dcaeacce95a092a67fd968c9ca51e7b79580a78809680f90925782e43475be`.
+  Live status showed Blue's patvs FFmpeg plus an unrelated Jellyfin FFmpeg,
+  Black's managed VLC, and an orphaned patvs VLC on Red. The Red orphan was
+  stopped; Red's process list is now empty.

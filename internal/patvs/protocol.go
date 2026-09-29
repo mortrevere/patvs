@@ -46,7 +46,14 @@ type ReceiverStatus struct {
 	Playback  string                 `json:"playback,omitempty"`
 	PlayerPID int                    `json:"player_pid,omitempty"`
 	PlayerErr string                 `json:"player_error,omitempty"`
+	Processes []MediaProcess         `json:"processes"`
 	Receivers []ReceiverInfo         `json:"receivers,omitempty"`
+}
+
+type MediaProcess struct {
+	PID     int    `json:"pid"`
+	Name    string `json:"name"`
+	Command string `json:"command"`
 }
 
 type sessionMessage struct {

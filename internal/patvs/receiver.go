@@ -150,6 +150,7 @@ func (r *receiver) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		status.PlayerPID = r.player.Process.Pid
 	}
 	r.mu.RUnlock()
+	status.Processes = listMediaProcesses()
 	writeJSON(w, status)
 }
 

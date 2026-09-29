@@ -55,7 +55,8 @@ given. The receiver list shows each receiver's current feed and source, or
 and ↑/↓ to select an emitter. Enter starts its feed and fullscreen VLC
 playback; `n` saves a snapshot, `x` stops VLC and its feed, Esc goes back, and
 `k` stops background discovery. `r` refreshes once; `q` quits. The scan status
-stays visible at the bottom.
+stays visible at the bottom. The selected receiver screen also lists current
+FFmpeg and VLC processes on that host, with PIDs and command lines.
 Scriptable commands are:
 
 ```text
