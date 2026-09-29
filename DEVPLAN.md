@@ -393,3 +393,14 @@ Acceptance targets on a healthy small LAN:
   on Blue, Red, and Black with the x64 build; all six running images match
   `42a576e57d20bf8c5c02f473887ac61ab510a0615ad2de949b5396a9668ab193`.
   All three receivers report all three emitters online.
+
+### 2026-09-29 — restore camera probe tools on field emitters
+
+- The emitter restart used `nix shell nixpkgs#ffmpeg` without `v4l2-ctl`.
+  Auto camera selection therefore reported `no usable V4L2 capture device
+  found` on every host. No leftover patvs FFmpeg capture process held a camera.
+- Restart field emitters with both tools in the environment:
+  `nix shell nixpkgs#ffmpeg nixpkgs#v4l-utils -c /tmp/patvs-field-bin emitter ...`.
+  Blue and Black again advertise `/dev/video0` at 640x480 MJPEG/30 fps.
+  Red's receiver reports active Black-camera frames for VLC. Red's own IPU6
+  camera remains unavailable as before.
