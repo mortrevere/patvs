@@ -183,8 +183,10 @@ Options without a mode apply to both roles; for example,
 explicit mode with `-h` for options.
 
 Emitter and receiver logs go to stderr with timestamps, severity, mode, and
-process ID (`mode=both` for the default combined process). They include
-discovery, connections, stream requests, snapshots, capture/player lifecycle,
+process ID (`mode=both` for the default combined process). Each role prints
+its absolute state file path on a dedicated INFO startup line, even without
+`--debug`: `msg="state file" role=emitter path=/absolute/path/emitter.json`.
+Logs also include discovery, connections, stream requests, snapshots, capture/player lifecycle,
 and failures. Add `--debug` for connection attempts,
 discovery counts, commands, first-frame delivery, and FFmpeg/VLC arguments:
 

@@ -93,6 +93,23 @@ func TestPlatformStatePath(t *testing.T) {
 	}
 }
 
+func TestRelativeStatePath(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	cfg := Config{Mode: "emitter", Name: "camera", Secret: "secret", DiscoveryPort: 7412,
+		StatePath: filepath.Join("state with spaces", "emitter.json")}
+	if err := cfg.Defaults(); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(root, "state with spaces", "emitter.json")
+	if cfg.StatePath != want {
+		t.Fatalf("state path %q, want %q", cfg.StatePath, want)
+	}
+	if cfg.SnapshotDir != filepath.Join(filepath.Dir(want), "snapshots") {
+		t.Fatalf("snapshot path: %q", cfg.SnapshotDir)
+	}
+}
+
 func TestBroadcastSocket(t *testing.T) {
 	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {

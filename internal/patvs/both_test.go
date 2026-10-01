@@ -16,7 +16,7 @@ func TestBothConfigs(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "state with spaces")
 	t.Setenv("XDG_STATE_HOME", root)
 	t.Setenv("LOCALAPPDATA", root)
-	for _, path := range []string{"", filepath.Join(root, "node.json"), filepath.Join(root, "node"), filepath.Join(root, "node.custom.json")} {
+	for _, path := range []string{"", filepath.Join(root, "node.json"), filepath.Join(root, "node"), filepath.Join(root, "node.custom.json"), filepath.Join("relative state", "node.json")} {
 		cfg := Config{Secret: "secret", DiscoveryPort: 7412, StatePath: path, Reset: true, Name: "node"}
 		configs, err := bothConfigs(cfg)
 		if err != nil {
@@ -27,6 +27,10 @@ func TestBothConfigs(t *testing.T) {
 			if path != "" {
 				stem := strings.TrimSuffix(path, ".json")
 				want = stem + "-" + role.Mode + ".json"
+				want, err = filepath.Abs(want)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 			if role.StatePath != want || !role.Reset || role.Name != cfg.Name {
 				t.Fatalf("role config: %#v, want state %q", role, want)

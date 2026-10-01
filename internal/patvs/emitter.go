@@ -23,7 +23,8 @@ type emitterDiskState struct {
 }
 
 func RunEmitter(ctx context.Context, cfg Config) error {
-	slog.Info("emitter starting", "name", cfg.Name, "state", cfg.StatePath, "camera", cfg.Camera, "discovery_port", cfg.DiscoveryPort)
+	slog.Info("emitter starting", "name", cfg.Name, "camera", cfg.Camera, "discovery_port", cfg.DiscoveryPort)
+	slog.Info("state file", "role", "emitter", "path", cfg.StatePath)
 	defer slog.Info("emitter stopped")
 	var state emitterDiskState
 	if err := loadJSON(cfg.StatePath, &state); err != nil {

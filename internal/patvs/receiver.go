@@ -68,7 +68,8 @@ type receiver struct {
 func RunReceiver(ctx context.Context, cfg Config) (err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	slog.Info("receiver starting", "name", cfg.Name, "state", cfg.StatePath, "discovery_port", cfg.DiscoveryPort)
+	slog.Info("receiver starting", "name", cfg.Name, "discovery_port", cfg.DiscoveryPort)
+	slog.Info("state file", "role", "receiver", "path", cfg.StatePath)
 	defer slog.Info("receiver stopped")
 	r := &receiver{
 		cfg: cfg, sessions: make(map[string]*emitterSession), latest: make(map[string][]byte),

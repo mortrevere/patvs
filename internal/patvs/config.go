@@ -71,6 +71,11 @@ func (c *Config) Defaults() error {
 		}
 		c.StatePath = filepath.Join(stateRoot, "patvs", c.Mode+".json")
 	}
+	statePath, err := filepath.Abs(c.StatePath)
+	if err != nil {
+		return fmt.Errorf("resolve state file path: %w", err)
+	}
+	c.StatePath = statePath
 	if c.SnapshotDir == "" {
 		c.SnapshotDir = filepath.Join(filepath.Dir(c.StatePath), "snapshots")
 	}
