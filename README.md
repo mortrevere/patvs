@@ -4,6 +4,51 @@ Portable All Terrain Video Streaming routes Linux and Windows camera feeds betwe
 unattended machines on an installation network. One executable runs as an
 emitter, receiver, or controller.
 
+## Architecture
+
+```mermaid
+flowchart LR
+    C["Controller<br/>TUI / CLI<br/>Select feeds, playback, snapshots"]
+
+    subgraph emitter_host["Emitter host"]
+        Camera["Camera<br/>V4L2 / DirectShow"] --> FFmpeg["FFmpeg<br/>Capture on demand"]
+        FFmpeg -->|JPEG frames| E["Emitter<br/>Discover receivers and send frames"]
+    end
+
+    subgraph receiver_host["Receiver host"]
+        R["Receiver<br/>Route frames and manage playback<br/>API / sessions: TCP 7411<br/>Discovery: UDP 7412<br/>Local MJPEG: TCP 7413"]
+        VLC["VLC"] -->|"Initiates HTTP GET<br/>127.0.0.1:7413"| R
+        VLC --> Screen["Display"]
+        R -->|Save JPEG| Snapshots["Snapshots on disk"]
+    end
+
+    C -->|"Initiates HTTP requests<br/>TCP 7411"| R
+    E -->|"Initiates WebSocket session<br/>TCP 7411 /v1/session"| R
+    C -.->|Sends discovery probes: UDP 7412| R
+    E -.->|Sends discovery probes: UDP 7412| R
+```
+
+Network arrows point from the **connection initiator to the listener**; replies
+and video can flow back over the same connection. Dashed arrows are UDP discovery
+probes, which receive replies without opening a connection. Other arrows show
+local capture, display, and storage. Ports shown are defaults.
+
+| Initiator | Listener | Default port | Protocol and purpose |
+| --- | --- | --- | --- |
+| Controller | Receiver | TCP 7411 | HTTP API: select feeds, start/stop streams or VLC, request snapshots, read status. |
+| Emitter | Receiver | TCP 7411 | WebSocket `/v1/session`: emitter sends JPEG frames, registration, and heartbeats; receiver sends stream demand, snapshot requests, and receiver hints. |
+| Emitter / controller / other receivers | Receiver | UDP 7412 | Discovery probes via IPv4 broadcast or IPv6 multicast; receiver replies with its identity and API port. |
+| Emitter / controller / other receivers | Receiver | TCP 7411 | HTTP `/v1/health` probes for seeds and discovery fallbacks; controller also scans private networks. |
+| VLC / local stream client | Receiver on the same host | TCP 7413, loopback only | HTTP GET `/streams/<emitter-id>.mjpg`; receiver returns an MJPEG feed. |
+
+The receiver is the hub: the controller reaches emitters through it, and it starts
+and stops local VLC and saves snapshots on its own disk. Emitters open sessions
+to multiple receivers and run FFmpeg only while frames are requested. Multiple
+emitters can connect to each receiver; VLC displays one selected feed at a time.
+The HTTP API and WebSocket sessions authenticate with the shared installation
+secret; discovery and `/v1/health` do not require it. See the
+[protocol documentation](docs/PROTOCOL.md) for wire details.
+
 ## Runtime requirements
 
 - Linux on x86-64, ARM64, or ARMv7; Windows 10/11 on x86-64 or ARM64
