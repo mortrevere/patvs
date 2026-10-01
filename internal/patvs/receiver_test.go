@@ -4,14 +4,130 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+func TestMain(m *testing.M) {
+	// The test binary doubles as a portable, long-running fake VLC. TestMain
+	// runs before flag parsing, so VLC's arguments do not need special handling.
+	if os.Getenv("PATVS_TEST_FAKE_PLAYER") == "1" {
+		time.Sleep(10 * time.Minute)
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+func TestPlayerSurvivesReconnectAndRepeatedPlayback(t *testing.T) {
+	t.Setenv("PATVS_TEST_FAKE_PLAYER", "1")
+	player, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := testReceiver()
+	r.cfg.Player = player
+	r.cfg.StreamAddr = "127.0.0.1:7413"
+	r.cfg.StatePath = filepath.Join(t.TempDir(), "receiver.json")
+	r.state.Playback = "camera"
+	r.state.Emitters["camera"] = EmitterInfo{ID: "camera"}
+	r.state.Emitters["other"] = EmitterInfo{ID: "other"}
+	var spawned []*exec.Cmd
+	defer func() {
+		r.stopPlayer()
+		for _, cmd := range spawned {
+			_ = cmd.Process.Kill()
+		}
+	}()
+	if err := r.startPlayer("camera"); err != nil {
+		t.Fatal(err)
+	}
+	original := r.player
+	spawned = append(spawned, original)
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := r.startPlayer("camera"); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	server := httptest.NewServer(r.apiHandler())
+	defer server.Close()
+	for range 2 {
+		conn := dialTestSession(t, server.URL, "secret")
+		defer conn.Close()
+		if err := conn.WriteJSON(sessionMessage{Type: "register", ID: "camera"}); err != nil {
+			t.Fatal(err)
+		}
+		var demand sessionMessage
+		if err := conn.ReadJSON(&demand); err != nil || !demand.Stream {
+			t.Fatalf("playback demand was not restored: %#v, %v", demand, err)
+		}
+	}
+	play := func(id string) {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPut, "/v1/playback", strings.NewReader(fmt.Sprintf(`{"emitter_id":%q}`, id)))
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		r.apiHandler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("play %s: %d %s", id, response.Code, response.Body.String())
+		}
+	}
+	play("camera")
+	r.mu.RLock()
+	unchanged := r.player == original && r.playerID == "camera"
+	r.mu.RUnlock()
+	if !unchanged {
+		t.Fatal("reconnect or repeated playback replaced the running VLC process")
+	}
+	play("other")
+	r.mu.RLock()
+	replacement := r.player
+	selected := r.playerID
+	r.mu.RUnlock()
+	if replacement == nil || replacement == original || selected != "other" {
+		t.Fatal("switching feeds did not replace VLC")
+	}
+	spawned = append(spawned, replacement)
+	if err := replacement.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		r.mu.RLock()
+		exited := r.player == nil && r.playerTry > 0
+		r.mu.RUnlock()
+		if exited {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("VLC exit did not schedule a retry")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := r.startPlayer("other"); err != nil {
+		t.Fatal(err)
+	}
+	r.mu.RLock()
+	restarted := r.player
+	r.mu.RUnlock()
+	if restarted == nil || restarted == replacement {
+		t.Fatal("VLC could not restart after exiting")
+	}
+	spawned = append(spawned, restarted)
+}
 
 func TestPlayerCommandFullscreenWindow(t *testing.T) {
 	t.Setenv("DISPLAY", ":1")

@@ -226,7 +226,8 @@ patvs controller delete <receiver> <emitter>
 
 The `stream` command is for clients that consume the receiver's loopback
 MJPEG socket directly. VLC playback starts its own feed and stopping it
-releases that feed.
+releases that feed. Reconnecting the selected emitter or selecting the same
+feed again keeps the running VLC process; switching feeds replaces it.
 
 Names, full IDs, unambiguous ID prefixes, and receiver addresses are accepted.
 Add `--json` before the command for machine-readable output. For repeatable
@@ -316,7 +317,9 @@ keeping their identities.
 
 Emitters forget remembered receivers after 10 consecutive failed connection
 attempts. Successful connections reset the count; discovery can find forgotten
-receivers again.
+receivers again. If an address now belongs to a different receiver identity,
+emitters remove the obsolete record and connect under the current identity.
+Peer hints are checked against `/v1/health` before they are remembered.
 
 Run `patvs emitter --reset` to forget remembered receivers on startup while
 keeping the emitter's device ID. Explicit seeds still apply, and discovery

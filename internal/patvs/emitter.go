@@ -60,6 +60,7 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 	type sessionResult struct {
 		peer     ReceiverInfo
 		failures int
+		actual   ReceiverInfo
 	}
 	results := make(chan sessionResult)
 	active := make(map[string]context.CancelFunc)
@@ -72,8 +73,21 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 	discoverNow := make(chan struct{}, 1)
 	discoverNow <- struct{}{}
 	remember := func(peer ReceiverInfo) {
+		changed := false
+		for id, known := range state.Receivers {
+			if id != peer.ID && known.Address == peer.Address {
+				if cancel := active[id]; cancel != nil {
+					cancel()
+				}
+				delete(state.Receivers, id)
+				delete(failures, id)
+				delete(forgotten, id)
+				changed = true
+				slog.Info("forgetting replaced receiver", "receiver_id", id, "replacement_id", peer.ID, "address", peer.Address)
+			}
+		}
 		old, exists := state.Receivers[peer.ID]
-		if exists && old.Address == peer.Address && old.Name == peer.Name {
+		if !changed && exists && old.Address == peer.Address && old.Name == peer.Name {
 			return
 		}
 		if old.Address != peer.Address {
@@ -96,9 +110,9 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 		go func() {
 			defer wg.Done()
 			defer cancel()
-			count := runEmitterSession(sessionCtx, cfg, identity, manager, peer, hints, previousFailures)
+			count, actual := runEmitterSession(sessionCtx, cfg, identity, manager, peer, hints, previousFailures)
 			select {
-			case results <- sessionResult{peer: peer, failures: count}:
+			case results <- sessionResult{peer: peer, failures: count, actual: actual}:
 			case <-ctx.Done():
 			}
 		}()
@@ -124,6 +138,11 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 			if current, ok := state.Receivers[peer.ID]; !ok || current.Address != peer.Address {
 				continue
 			}
+			if result.actual.ID != "" {
+				remember(result.actual)
+				startSession(result.actual)
+				continue
+			}
 			failures[peer.ID] = result.failures
 			if result.failures >= maxReceiverReconnectAttempts {
 				delete(state.Receivers, peer.ID)
@@ -139,6 +158,12 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 			default:
 			}
 		case peer := <-hints:
+			// Hints may outlive a receiver's identity or address assignment.
+			verified, ok := probeReceiver(ctx, &http.Client{Timeout: 2 * time.Second}, peer.Address)
+			if !ok {
+				continue
+			}
+			peer = verified
 			if forgotten[peer.ID] == peer.Address {
 				continue
 			}
@@ -175,13 +200,18 @@ func appendUnique(values []string, value string) []string {
 	return append(values, value)
 }
 
-func runEmitterSession(ctx context.Context, cfg Config, identity Identity, manager *captureManager, peer ReceiverInfo, hints chan<- ReceiverInfo, failures int) int {
+func runEmitterSession(ctx context.Context, cfg Config, identity Identity, manager *captureManager, peer ReceiverInfo, hints chan<- ReceiverInfo, failures int) (int, ReceiverInfo) {
 	delay := 250 * time.Millisecond
 	for attempt := 0; ctx.Err() == nil && attempt < 3 && failures < maxReceiverReconnectAttempts; attempt++ {
 		slog.Debug("connecting to receiver", "receiver_id", peer.ID, "receiver", peer.Name, "address", peer.Address, "attempt", failures+1)
+		// Check before opening a session: aliases with old IDs otherwise evict
+		// the connection to the same receiver's current ID indefinitely.
+		if actual, ok := probeReceiver(ctx, &http.Client{Timeout: 2 * time.Second}, peer.Address); ok && actual.ID != peer.ID {
+			return failures, actual
+		}
 		connected, err := connectEmitter(ctx, cfg, identity, manager, peer, hints)
 		if ctx.Err() != nil {
-			return failures
+			return failures, ReceiverInfo{}
 		}
 		if connected {
 			failures = 0
@@ -195,7 +225,7 @@ func runEmitterSession(ctx context.Context, cfg Config, identity Identity, manag
 		slog.Warn("receiver session ended; retrying", "receiver_id", peer.ID, "receiver", peer.Name, "address", peer.Address, "failed_attempts", failures, "retry_delay", delay+jitter, "error", err)
 		select {
 		case <-ctx.Done():
-			return failures
+			return failures, ReceiverInfo{}
 		case <-time.After(delay + jitter):
 		}
 		if delay < 5*time.Second {
@@ -208,7 +238,7 @@ func runEmitterSession(ctx context.Context, cfg Config, identity Identity, manag
 	if ctx.Err() == nil {
 		slog.Debug("receiver session retries exhausted; rediscovering", "receiver_id", peer.ID, "address", peer.Address)
 	}
-	return failures
+	return failures, ReceiverInfo{}
 }
 
 func connectEmitter(ctx context.Context, cfg Config, identity Identity, manager *captureManager, peer ReceiverInfo, hints chan<- ReceiverInfo) (bool, error) {

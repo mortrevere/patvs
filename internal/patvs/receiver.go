@@ -58,7 +58,9 @@ type receiver struct {
 	waiters   map[string][]chan []byte
 	listeners map[string]map[chan []byte]struct{}
 	peers     map[string]ReceiverInfo
+	playerMu  sync.Mutex
 	player    *exec.Cmd
+	playerID  string
 	playerErr string
 	playerTry int
 	playerAt  time.Time
@@ -655,7 +657,16 @@ func (r *receiver) playerCommand(id string) *exec.Cmd {
 }
 
 func (r *receiver) startPlayer(id string) error {
-	r.stopPlayer()
+	r.playerMu.Lock()
+	defer r.playerMu.Unlock()
+	r.mu.RLock()
+	playing := r.player != nil && r.playerID == id
+	selected := r.state.Playback == id
+	r.mu.RUnlock()
+	if playing || !selected {
+		return nil
+	}
+	r.stopPlayerLocked()
 	cmd := r.playerCommand(id)
 	slog.Info("starting VLC", "emitter_id", id, "command", cmd.String(), "args", cmd.Args[1:], "display", os.Getenv("DISPLAY"), "wayland_display", os.Getenv("WAYLAND_DISPLAY"), "desktop", os.Getenv("XDG_CURRENT_DESKTOP"))
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
@@ -669,6 +680,7 @@ func (r *receiver) startPlayer(id string) error {
 	}
 	r.mu.Lock()
 	r.player, r.playerErr = cmd, ""
+	r.playerID = id
 	r.playerAt = time.Time{}
 	r.mu.Unlock()
 	slog.Info("player started", "emitter_id", id, "player_pid", cmd.Process.Pid)
@@ -678,6 +690,7 @@ func (r *receiver) startPlayer(id string) error {
 		if r.player == cmd {
 			slog.Warn("player exited", "emitter_id", id, "player_pid", cmd.Process.Pid, "error", err)
 			r.player = nil
+			r.playerID = ""
 			if err != nil {
 				r.playerErr = err.Error()
 			} else {
@@ -703,9 +716,17 @@ func (r *receiver) schedulePlayerRetryLocked() {
 }
 
 func (r *receiver) stopPlayer() {
+	r.playerMu.Lock()
+	defer r.playerMu.Unlock()
+	r.stopPlayerLocked()
+}
+
+// stopPlayerLocked requires playerMu; receiver state remains protected by mu.
+func (r *receiver) stopPlayerLocked() {
 	r.mu.Lock()
 	cmd := r.player
 	r.player = nil
+	r.playerID = ""
 	r.mu.Unlock()
 	if cmd != nil && cmd.Process != nil {
 		slog.Info("player stopping", "player_pid", cmd.Process.Pid)
