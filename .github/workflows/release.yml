@@ -35,4 +35,5 @@ jobs:
           gh release create "$VERSION" dist/patvs-linux-* dist/SHA256SUMS \
             --target "$GITHUB_SHA" \
             --title "patvs $VERSION" \
+            --latest \
             --generate-notes

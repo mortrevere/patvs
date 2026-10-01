@@ -37,6 +37,16 @@ GitHub Actions runs tests and publishes these binaries and `SHA256SUMS` as a
 release on pushes to any branch that change Go files, `go.mod`, `go.sum`, the
 build script, or the release workflow. Releases use unique
 `build-<run number>-<attempt>` tags pointing to the pushed commit.
+Each published release is marked as latest, so the download URL stays stable:
+
+```sh
+wget -O patvs https://github.com/mortrevere/patvs/releases/latest/download/patvs-linux-amd64
+chmod +x patvs
+```
+
+For ARM64 or ARMv7, replace `patvs-linux-amd64` with `patvs-linux-arm64` or
+`patvs-linux-armv7`. Checksums are available at
+`https://github.com/mortrevere/patvs/releases/latest/download/SHA256SUMS`.
 
 Run the freshly built x64 controller from this checkout with
 `./dist/patvs-linux-amd64 controller`. The build does not replace a separate
