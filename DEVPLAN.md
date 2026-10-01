@@ -437,9 +437,10 @@ Acceptance targets on a healthy small LAN:
   DirectShow webcam at 640x480 YUYV/30 fps. The webcam was returned to WSL.
 - The Windows controller discovers Black and Blue at `10.0.0.29` and `.30`.
   Windows emitter snapshots succeed on both Linux receivers. Inbound LAN
-  connections to the Windows test receiver were blocked by host networking;
-  the release executable has a Public-profile firewall block rule, and Wi-Fi
-  IPv6 is disabled. Local Windows receiver and playback tests pass. No host
-  firewall or network-profile changes were made.
+  connections to the Windows test receiver did not succeed. Initial checks
+  found a Public-profile firewall block; user approvals changed it to Allow,
+  but field emitters still did not connect. Wi-Fi IPv6 is disabled. Local
+  Windows receiver and playback tests pass; inbound LAN acceptance remains
+  outstanding. The agent did not alter host network settings.
 - Windows ARM64 is cross-built and vetted; native ARM64 hardware acceptance
   remains outstanding.
