@@ -72,6 +72,9 @@ func run(args []string) error {
 		player = "vlc"
 	}
 	flags.StringVar(&cfg.Player, "player", player, "VLC executable path")
+	if mode == "receiver" {
+		flags.StringVar(&cfg.DisplayAspectRatio, "display-aspect-ratio", os.Getenv("PATVS_DISPLAY_ASPECT_RATIO"), "stretch playback to this display ratio, e.g. 4:3 or 16:9 (default: preserve source ratio)")
+	}
 	flags.BoolVar(&cfg.Debug, "debug", false, "enable debug logs")
 	if mode == "emitter" || mode == "receiver" {
 		flags.BoolVar(&cfg.Reset, "reset", false, "forget remembered peers and their settings on startup (keep device identity)")

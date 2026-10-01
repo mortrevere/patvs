@@ -1,6 +1,7 @@
 package patvs
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -27,6 +28,36 @@ func TestPlayerCommandFullscreenWindow(t *testing.T) {
 	r.cfg.Debug = true
 	if !slices.Contains(r.playerCommand("camera").Args, "--verbose=2") {
 		t.Fatal("debug mode did not enable VLC logging")
+	}
+}
+
+func TestPlayerCommandDisplayAspectRatio(t *testing.T) {
+	for _, desktop := range []bool{false, true} {
+		t.Run(fmt.Sprintf("desktop=%t", desktop), func(t *testing.T) {
+			t.Setenv("DISPLAY", "")
+			t.Setenv("WAYLAND_DISPLAY", "")
+			if desktop {
+				t.Setenv("WAYLAND_DISPLAY", "wayland-1")
+			}
+			r := &receiver{cfg: Config{Player: "vlc", StreamAddr: "127.0.0.1:7413"}}
+			for _, ratio := range []string{"", "4:3", "16:9"} {
+				r.cfg.DisplayAspectRatio = ratio
+				cmd := r.playerCommand("camera")
+				var aspectArgs []string
+				for _, arg := range cmd.Args {
+					if strings.HasPrefix(arg, "--aspect-ratio=") {
+						aspectArgs = append(aspectArgs, arg)
+					}
+				}
+				if ratio == "" {
+					if len(aspectArgs) != 0 {
+						t.Fatalf("unexpected ratio override: %v", aspectArgs)
+					}
+				} else if len(aspectArgs) != 1 || aspectArgs[0] != "--aspect-ratio="+ratio {
+					t.Fatalf("incorrect ratio override: %v", aspectArgs)
+				}
+			}
+		})
 	}
 }
 

@@ -557,6 +557,9 @@ func (r *receiver) saveSnapshot(id string, frame []byte) (string, error) {
 func (r *receiver) playerCommand(id string) *exec.Cmd {
 	url := "http://" + r.cfg.StreamAddr + "/streams/" + id + ".mjpg"
 	args := []string{"--ignore-config", "--intf=dummy", "--no-embedded-video", "--video-title=patvs-playback", "--fullscreen", "--autoscale", "--no-video-title-show", "--network-caching=150", "--no-audio", url}
+	if r.cfg.DisplayAspectRatio != "" {
+		args = append([]string{"--aspect-ratio=" + r.cfg.DisplayAspectRatio}, args...)
+	}
 	if os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
 		_, drmErr := os.Stat("/dev/dri/card0")
 		_, fbErr := os.Stat("/dev/fb0")

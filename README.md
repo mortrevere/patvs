@@ -121,6 +121,20 @@ Receiver playback ignores saved VLC preferences and explicitly requests a
 standalone fullscreen video window with automatic scaling to fit the screen.
 The receiver's `--debug` flag also enables VLC's own verbose diagnostics.
 
+To stretch incoming video to fill the display without letterboxing or
+pillarboxing, set the receiver's **display** ratio, regardless of the source:
+
+```sh
+patvs receiver --display-aspect-ratio 4:3  # 4:3 screen, including 16:9 feeds
+patvs receiver --display-aspect-ratio 16:9 # widescreen, including 4:3 feeds
+```
+
+For services, set `PATVS_DISPLAY_ASPECT_RATIO=4:3` or `16:9` in
+`/etc/patvs/patvs.env`. This stretches the whole picture without cropping and
+applies to desktop, DRM/KMS, and framebuffer playback. VLC 3 requires a fixed
+target ratio; resizing a desktop window to another ratio may still leave
+borders. Without this setting, playback preserves the source aspect ratio.
+
 For testing under Hyprland 0.52, placement rules can override VLC's fullscreen
 request. Add these rules after general placement rules in your Hyprland config
 to target the receiver's `patvs-playback` window:

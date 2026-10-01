@@ -4,27 +4,42 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 )
 
 type Config struct {
-	Mode          string
-	Name          string
-	Secret        string
-	StatePath     string
-	APIAddr       string
-	DiscoveryPort int
-	StreamAddr    string
-	Seeds         []string
-	JSON          bool
-	Camera        string
-	SnapshotDir   string
-	Player        string
-	Debug         bool
-	Reset         bool
-	Args          []string
+	Mode               string
+	Name               string
+	Secret             string
+	StatePath          string
+	APIAddr            string
+	DiscoveryPort      int
+	StreamAddr         string
+	Seeds              []string
+	JSON               bool
+	Camera             string
+	SnapshotDir        string
+	Player             string
+	DisplayAspectRatio string
+	Debug              bool
+	Reset              bool
+	Args               []string
 }
 
 func (c *Config) Defaults() error {
+	if c.DisplayAspectRatio != "" {
+		parts := strings.Split(c.DisplayAspectRatio, ":")
+		if len(parts) != 2 {
+			return fmt.Errorf("display aspect ratio must be positive width:height, such as 4:3 or 16:9")
+		}
+		for _, part := range parts {
+			value, err := strconv.ParseUint(part, 10, 32)
+			if err != nil || value == 0 {
+				return fmt.Errorf("invalid display aspect ratio %q: use positive width:height", c.DisplayAspectRatio)
+			}
+		}
+	}
 	if c.Secret == "" {
 		return fmt.Errorf("secret cannot be empty")
 	}
