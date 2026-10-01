@@ -33,6 +33,11 @@ build metadata can be supplied without editing source:
 VERSION=0.1.0 SEEDS=receiver.example.net:7411 ./scripts/build.sh
 ```
 
+GitHub Actions runs tests and publishes these binaries and `SHA256SUMS` as a
+release on pushes to any branch that change Go files, `go.mod`, `go.sum`, the
+build script, or the release workflow. Releases use unique
+`build-<run number>-<attempt>` tags pointing to the pushed commit.
+
 Run the freshly built x64 controller from this checkout with
 `./dist/patvs-linux-amd64 controller`. The build does not replace a separate
 `patvs` command already on your `PATH`.
