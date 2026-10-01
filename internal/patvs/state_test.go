@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -62,8 +63,16 @@ func TestJSONStateRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("state permissions are %o", info.Mode().Perm())
+	}
+	// Replacing an existing file is required for peer updates on both platforms.
+	want.Name = "updated camera"
+	if err := saveJSON(path, want); err != nil {
+		t.Fatal(err)
+	}
+	if err := loadJSON(path, &got); err != nil || got != want {
+		t.Fatalf("replace state: got %#v, error %v", got, err)
 	}
 }
 

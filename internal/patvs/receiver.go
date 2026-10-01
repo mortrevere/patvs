@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -560,7 +561,10 @@ func (r *receiver) playerCommand(id string) *exec.Cmd {
 	if r.cfg.DisplayAspectRatio != "" {
 		args = append([]string{"--aspect-ratio=" + r.cfg.DisplayAspectRatio}, args...)
 	}
-	if os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
+	if runtime.GOOS == "windows" {
+		args = append([]string{"--no-one-instance"}, args...)
+	}
+	if runtime.GOOS == "linux" && os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
 		_, drmErr := os.Stat("/dev/dri/card0")
 		_, fbErr := os.Stat("/dev/fb0")
 		switch {
@@ -575,7 +579,7 @@ func (r *receiver) playerCommand(id string) *exec.Cmd {
 	if r.cfg.Debug {
 		args = append([]string{"--verbose=2"}, args...)
 	}
-	return exec.Command(r.cfg.Player, args...)
+	return mediaCommand(context.Background(), r.cfg.Player, args...)
 }
 
 func (r *receiver) startPlayer(id string) error {
@@ -633,8 +637,12 @@ func (r *receiver) stopPlayer() {
 	r.mu.Unlock()
 	if cmd != nil && cmd.Process != nil {
 		slog.Info("player stopping", "player_pid", cmd.Process.Pid)
-		_ = cmd.Process.Signal(os.Interrupt)
-		time.AfterFunc(2*time.Second, func() { _ = cmd.Process.Kill() })
+		if runtime.GOOS == "windows" {
+			_ = cmd.Process.Kill()
+		} else {
+			_ = cmd.Process.Signal(os.Interrupt)
+			time.AfterFunc(2*time.Second, func() { _ = cmd.Process.Kill() })
+		}
 	}
 }
 

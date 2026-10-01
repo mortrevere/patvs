@@ -65,7 +65,7 @@ func run(args []string) error {
 	if camera == "" {
 		camera = "auto"
 	}
-	flags.StringVar(&cfg.Camera, "camera", camera, "V4L2 device, lavfi expression, or auto")
+	flags.StringVar(&cfg.Camera, "camera", camera, "camera device (V4L2 path or Windows DirectShow name), lavfi expression, or auto")
 	flags.StringVar(&cfg.SnapshotDir, "snapshot-dir", "", "receiver snapshot directory")
 	player := os.Getenv("PATVS_PLAYER")
 	if player == "" {

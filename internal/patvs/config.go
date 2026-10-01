@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -53,15 +54,21 @@ func (c *Config) Defaults() error {
 		}
 		c.Name = name
 	}
-	stateRoot := os.Getenv("XDG_STATE_HOME")
-	if stateRoot == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("find home directory: %w", err)
-		}
-		stateRoot = filepath.Join(home, ".local", "state")
-	}
 	if c.StatePath == "" {
+		stateRoot := os.Getenv("XDG_STATE_HOME")
+		if runtime.GOOS == "windows" {
+			stateRoot = os.Getenv("LOCALAPPDATA")
+		}
+		if stateRoot == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("find home directory: %w", err)
+			}
+			stateRoot = filepath.Join(home, ".local", "state")
+			if runtime.GOOS == "windows" {
+				stateRoot = filepath.Join(home, "AppData", "Local")
+			}
+		}
 		c.StatePath = filepath.Join(stateRoot, "patvs", c.Mode+".json")
 	}
 	if c.SnapshotDir == "" {

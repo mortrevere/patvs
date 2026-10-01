@@ -90,6 +90,7 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 			}
 			mu.Unlock()
 			wg.Wait()
+			manager.captureWG.Wait()
 			return nil
 		case <-discoverTicker.C:
 			select {

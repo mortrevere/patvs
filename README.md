@@ -1,13 +1,13 @@
 # patvs
 
-Portable All Terrain Video Streaming routes Linux camera feeds between
+Portable All Terrain Video Streaming routes Linux and Windows camera feeds between
 unattended machines on an installation network. One executable runs as an
 emitter, receiver, or controller.
 
 ## Runtime requirements
 
-- Linux on x86-64, ARM64, or ARMv7
-- FFmpeg and `v4l2-ctl` on emitters
+- Linux on x86-64, ARM64, or ARMv7; Windows 10/11 on x86-64 or ARM64
+- FFmpeg on emitters, plus `v4l2-ctl` on Linux emitters
 - VLC on receivers that drive a screen
 
 The daemons discover receivers automatically on connected LANs. The controller
@@ -26,7 +26,10 @@ go test ./...
 ./scripts/build.sh
 ```
 
-The build creates static Linux binaries and checksums under `dist/`. Optional
+The build creates static Linux binaries, Windows `.exe` files, and checksums
+under `dist/`. On Windows with Go installed, run
+`powershell -ExecutionPolicy Bypass -File ./scripts/build.ps1` to build the
+same five targets. Optional
 build metadata can be supplied without editing source:
 
 ```sh
@@ -35,7 +38,8 @@ VERSION=0.1.0 SEEDS=receiver.example.net:7411 ./scripts/build.sh
 
 GitHub Actions runs tests and publishes these binaries and `SHA256SUMS` as a
 release on pushes to any branch that change Go files, `go.mod`, `go.sum`, the
-build script, or the release workflow. Releases use unique
+build scripts, or the release workflow. Native Linux and Windows tests must
+pass before publishing. Releases use unique
 `build-<run number>-<attempt>` tags pointing to the pushed commit.
 Each published release is marked as latest, so the download URL stays stable:
 
@@ -51,6 +55,65 @@ For ARM64 or ARMv7, replace `patvs-linux-amd64` with `patvs-linux-arm64` or
 Run the freshly built x64 controller from this checkout with
 `./dist/patvs-linux-amd64 controller`. The build does not replace a separate
 `patvs` command already on your `PATH`.
+
+## Windows
+
+Download `patvs-windows-amd64.exe` from the same release (or
+`patvs-windows-arm64.exe` for Windows on ARM):
+
+```powershell
+Invoke-WebRequest https://github.com/mortrevere/patvs/releases/latest/download/patvs-windows-amd64.exe -OutFile patvs.exe
+./patvs.exe controller
+./patvs.exe receiver
+./patvs.exe emitter
+```
+
+Run each mode in its own terminal. The controller works in PowerShell, Command
+Prompt, and Windows Terminal. Controllers only need patvs. Emitters need a
+Windows FFmpeg build with [DirectShow support](https://ffmpeg.org/ffmpeg-devices.html#dshow);
+put `ffmpeg.exe` on `PATH` or beside `patvs.exe`. Receivers find VLC on `PATH`,
+beside patvs, or in its standard `Program Files/VideoLAN/VLC` installation.
+Use `--player 'C:\custom path\vlc.exe'` to override this.
+
+Automatic camera selection prefers a usable mode of at least 640x480, then
+native MJPEG. Specify a camera by its DirectShow name when needed:
+
+```powershell
+ffmpeg -hide_banner -list_devices true -f dshow -i dummy
+./patvs.exe emitter --camera 'Integrated Camera'
+./patvs.exe emitter --camera 'lavfi:color=c=red:s=640x480:r=25'
+```
+
+The FFmpeg listing command normally exits with an error after printing the
+device list. Enable camera access for desktop applications in Windows privacy
+settings. A USB camera attached to WSL is unavailable to native Windows until
+detached from WSL. Linux continues to use V4L2.
+
+Allow patvs on your private network when Windows Firewall prompts. Receivers
+need inbound TCP 7411 and UDP 7412; emitters and controllers also need UDP
+discovery replies. TCP 7413 stays on loopback. If broadcast is blocked, pass
+`--seeds 10.0.0.29:7411,10.0.0.30:7411` for known receivers.
+Windows and Linux machines use the same commands, shared secret, and protocol.
+
+State and snapshots default to `%LOCALAPPDATA%\patvs`; `--state` and
+`--snapshot-dir` override these paths. Ctrl+C shuts down a mode and its managed
+media processes. For unattended desktop playback, create a Task Scheduler
+task at user logon, select **Run only when user is logged on**, set the program
+to the full path of `patvs.exe`, and give it `receiver` arguments. Create a
+separate task for `emitter` if needed; configure restart on failure. Use
+`PATVS_SECRET` or `--secret` to match the Linux installation. Receiver VLC
+playback needs an interactive Windows desktop session.
+
+To repeat the portable end-to-end test with Go and FFmpeg installed:
+
+```powershell
+$env:PATVS_INTEGRATION = '1'
+$env:PATVS_TEST_PLAYER = 'vlc' # optional: also exercise real fullscreen playback
+go test ./internal/patvs -run TestLocalVideoIntegration -v
+```
+
+Set `$env:PATVS_TEST_CAMERA = 'auto'` to test a real webcam instead of the synthetic
+source. The test uses temporary state and ports and stops its own processes.
 
 ## Run
 
@@ -180,7 +243,8 @@ fallback, changes the receiver address, and checks reconnection:
 
 The default ports are TCP 7411 for the receiver API and emitter sessions, UDP
 7412 for discovery, and loopback TCP 7413 for received MJPEG streams. State is
-stored below `$XDG_STATE_HOME/patvs` or `~/.local/state/patvs`; emitter and
+stored below `$XDG_STATE_HOME/patvs` or `~/.local/state/patvs` on Linux and
+`%LOCALAPPDATA%\patvs` on Windows; emitter and
 receiver modes use separate files and can run together.
 
 Run `patvs emitter --reset` to forget remembered receivers on startup while

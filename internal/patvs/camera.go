@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,6 +28,9 @@ func selectCamera(ctx context.Context, requested string) (Camera, error) {
 	if strings.HasPrefix(requested, "lavfi:") {
 		return Camera{Device: strings.TrimPrefix(requested, "lavfi:"), Format: "lavfi", Width: 640, Height: 480, FPS: 25, Synthetic: true}, nil
 	}
+	if runtime.GOOS == "windows" {
+		return selectDShowCamera(ctx, requested)
+	}
 	if requested != "auto" {
 		return inspectCamera(ctx, requested)
 	}
@@ -42,26 +46,28 @@ func selectCamera(ctx context.Context, requested string) (Camera, error) {
 	if len(choices) == 0 {
 		return Camera{}, fmt.Errorf("no usable V4L2 capture device found")
 	}
-	sort.SliceStable(choices, func(i, j int) bool {
-		iMeets := choices[i].Width >= 640 && choices[i].Height >= 480
-		jMeets := choices[j].Width >= 640 && choices[j].Height >= 480
-		if iMeets != jMeets {
-			return iMeets
-		}
-		iMJPEG, jMJPEG := choices[i].Format == "mjpeg", choices[j].Format == "mjpeg"
-		if iMJPEG != jMJPEG {
-			return iMJPEG
-		}
-		iArea, jArea := choices[i].Width*choices[i].Height, choices[j].Width*choices[j].Height
-		if iMeets && iArea != jArea {
-			return iArea < jArea
-		}
-		if !iMeets && iArea != jArea {
-			return iArea > jArea
-		}
-		return choices[i].Device < choices[j].Device
-	})
+	sort.SliceStable(choices, func(i, j int) bool { return betterCamera(choices[i], choices[j]) })
 	return choices[0], nil
+}
+
+func betterCamera(a, b Camera) bool {
+	iMeets := a.Width >= 640 && a.Height >= 480
+	jMeets := b.Width >= 640 && b.Height >= 480
+	if iMeets != jMeets {
+		return iMeets
+	}
+	iMJPEG, jMJPEG := a.Format == "mjpeg", b.Format == "mjpeg"
+	if iMJPEG != jMJPEG {
+		return iMJPEG
+	}
+	iArea, jArea := a.Width*a.Height, b.Width*b.Height
+	if iMeets && iArea != jArea {
+		return iArea < jArea
+	}
+	if !iMeets && iArea != jArea {
+		return iArea > jArea
+	}
+	return a.Device < b.Device
 }
 
 func inspectCamera(ctx context.Context, path string) (Camera, error) {
@@ -127,6 +133,7 @@ type captureManager struct {
 	cfg         Config
 	camera      Camera
 	mu          sync.Mutex
+	captureWG   sync.WaitGroup
 	subscribers map[string]chan []byte
 	demand      map[string]bool
 	cancel      context.CancelFunc
@@ -160,7 +167,11 @@ func (m *captureManager) setDemand(key string, active bool) {
 	if active && m.cancel == nil {
 		ctx, cancel := context.WithCancel(context.Background())
 		m.cancel = cancel
-		go m.captureLoop(ctx)
+		m.captureWG.Add(1)
+		go func() {
+			defer m.captureWG.Done()
+			m.captureLoop(ctx)
+		}()
 	} else if !active {
 		m.stopIfIdleLocked()
 	}
@@ -200,7 +211,7 @@ func (m *captureManager) captureLoop(ctx context.Context) {
 
 func (m *captureManager) captureOnce(ctx context.Context) error {
 	if !m.camera.Synthetic && (m.camera.Width == 0 || m.camera.Device == "auto") {
-		camera, err := selectCamera(ctx, "auto")
+		camera, err := selectCamera(ctx, m.cfg.Camera)
 		if err != nil {
 			return err
 		}
@@ -210,7 +221,7 @@ func (m *captureManager) captureOnce(ctx context.Context) error {
 	}
 	args := ffmpegArgs(m.camera)
 	slog.Debug("starting camera capture", "device", m.camera.Device, "args", args)
-	command := exec.CommandContext(ctx, "ffmpeg", args...)
+	command := mediaCommand(ctx, "ffmpeg", args...)
 	stdout, err := command.StdoutPipe()
 	if err != nil {
 		return err
@@ -242,6 +253,14 @@ func ffmpegArgs(camera Camera) []string {
 	base := []string{"-hide_banner", "-loglevel", "warning", "-nostdin"}
 	if camera.Synthetic {
 		base = append(base, "-f", "lavfi", "-i", camera.Device, "-an", "-c:v", "mjpeg", "-q:v", "5")
+	} else if strings.HasPrefix(camera.Device, "dshow:") {
+		base = append(base, dshowInputArgs(camera)...)
+		base = append(base, "-an")
+		if camera.Format == "mjpeg" {
+			base = append(base, "-c:v", "copy")
+		} else {
+			base = append(base, "-c:v", "mjpeg", "-q:v", "5")
+		}
 	} else {
 		base = append(base, "-f", "v4l2", "-input_format", camera.Format,
 			"-video_size", fmt.Sprintf("%dx%d", camera.Width, camera.Height),

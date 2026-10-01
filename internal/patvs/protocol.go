@@ -36,6 +36,7 @@ type Camera struct {
 	Width     int    `json:"width,omitempty"`
 	Height    int    `json:"height,omitempty"`
 	FPS       int    `json:"fps,omitempty"`
+	FrameRate string `json:"frame_rate,omitempty"` // Exact DirectShow rate (e.g. 29.9701).
 	Synthetic bool   `json:"synthetic,omitempty"`
 }
 

@@ -8,13 +8,29 @@ on:
       - go.mod
       - go.sum
       - scripts/build.sh
+      - scripts/build.ps1
       - .github/workflows/release.yml
 
 permissions:
   contents: write
 
 jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - run: go test -race ./...
+      - run: go vet ./...
+
   release:
+    needs: test
     runs-on: ubuntu-latest
     env:
       VERSION: build-${{ github.run_number }}-${{ github.run_attempt }}
@@ -24,15 +40,14 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
-      - name: Test
-        run: go test ./...
       - name: Build binaries
         run: ./scripts/build.sh
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$VERSION" dist/patvs-linux-* dist/SHA256SUMS \
+          gh release create "$VERSION" dist/patvs-linux-* \
+            dist/patvs-windows-amd64.exe dist/patvs-windows-arm64.exe dist/SHA256SUMS \
             --target "$GITHUB_SHA" \
             --title "patvs $VERSION" \
             --latest \

@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -309,7 +308,7 @@ func setBroadcast(conn *net.UDPConn) error {
 	}
 	var socketErr error
 	err = raw.Control(func(fd uintptr) {
-		socketErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_BROADCAST, 1)
+		socketErr = enableBroadcast(fd)
 	})
 	if err != nil {
 		return err

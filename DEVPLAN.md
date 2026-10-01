@@ -9,7 +9,9 @@ criteria pass.
 
 - One Go executable with `emitter`, `receiver`, and `controller` modes.
 - Linux targets: `amd64`, `arm64`, and `armv7` (Raspberry Pi 4 included).
-- FFmpeg captures V4L2 video; VLC provides fullscreen receiver playback.
+- Windows targets: `amd64` and `arm64`, published as `.exe` release assets.
+- FFmpeg captures V4L2 video on Linux and DirectShow on Windows; VLC provides
+  fullscreen receiver playback.
 - Default video profile: MJPEG, 640x480, at most 25 fps, without audio.
 - Discovery covers all active interfaces, IPv4 LANs, IPv6 link-local networks,
   and optional build-time receiver seeds for routed networks.
@@ -417,3 +419,27 @@ Acceptance targets on a healthy small LAN:
   Live status showed Blue's patvs FFmpeg plus an unrelated Jellyfin FFmpeg,
   Black's managed VLC, and an orphaned patvs VLC on Red. The Red orphan was
   stopped; Red's process list is now empty.
+
+### 2026-10-01 — Windows port
+
+- Added native Windows DirectShow auto-selection and named-camera capture,
+  exact fractional input rates, Windows UDP broadcast sockets, LocalAppData
+  state, FFmpeg/VLC executable discovery, and CIM media-process inspection.
+  Windows VLC runs in a separate instance and stops via process termination.
+  Emitter shutdown now waits for its cancelled capture processes to exit.
+- Shell and PowerShell builds produce the three existing Linux targets and
+  `patvs-windows-amd64.exe`/`patvs-windows-arm64.exe` with one checksum file.
+  Release CI runs Linux and Windows tests/vet before publishing all five.
+- Linux race tests, vet, and the existing synthetic integration harness pass.
+  The full Windows unit suite passes natively through WSL host interop.
+  Native Windows end-to-end tests cover synthetic red JPEG snapshots, decoded
+  MJPEG streams, real VLC playback/process inspection, and the integrated
+  DirectShow webcam at 640x480 YUYV/30 fps. The webcam was returned to WSL.
+- The Windows controller discovers Black and Blue at `10.0.0.29` and `.30`.
+  Windows emitter snapshots succeed on both Linux receivers. Inbound LAN
+  connections to the Windows test receiver were blocked by host networking;
+  the release executable has a Public-profile firewall block rule, and Wi-Fi
+  IPv6 is disabled. Local Windows receiver and playback tests pass. No host
+  firewall or network-profile changes were made.
+- Windows ARM64 is cross-built and vetted; native ARM64 hardware acceptance
+  remains outstanding.

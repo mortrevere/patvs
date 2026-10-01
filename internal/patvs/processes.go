@@ -1,13 +1,26 @@
+//go:build !windows
+
 package patvs
 
 import (
 	"bytes"
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 )
+
+func mediaCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
+	return exec.CommandContext(ctx, name, args...)
+}
+
+func enableBroadcast(fd uintptr) error {
+	return syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_BROADCAST, 1)
+}
 
 func listMediaProcesses() []MediaProcess {
 	entries, err := os.ReadDir("/proc")

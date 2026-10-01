@@ -23,6 +23,12 @@ VLC processes. Each entry has a PID, process name, and command line. The list
 may include processes unrelated to patvs; `player_pid` identifies the VLC
 process owned by this receiver.
 
+Linux and Windows use the same version 1 wire protocol. Windows cameras report
+`dshow:<device name>` and may include the optional `camera.frame_rate` string
+to preserve a fractional DirectShow input rate; `camera.fps` remains an
+integer for existing clients. Receivers do not need to interpret the capture
+device or format to route JPEG frames.
+
 The persistent ID identifies a device. Addresses are replaceable connection
 candidates and must never become database keys. Messages are versioned at the
 discovery boundary; incompatible protocol versions are ignored.
