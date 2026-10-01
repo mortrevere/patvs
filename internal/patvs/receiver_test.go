@@ -3,12 +3,32 @@ package patvs
 import (
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+func TestPlayerCommandFullscreenWindow(t *testing.T) {
+	t.Setenv("DISPLAY", ":1")
+	t.Setenv("WAYLAND_DISPLAY", "wayland-1")
+	r := &receiver{cfg: Config{Player: "vlc", StreamAddr: "127.0.0.1:7413"}}
+	cmd := r.playerCommand("camera")
+	for _, flag := range []string{"--video-title=patvs-playback", "--fullscreen", "--autoscale"} {
+		if !slices.Contains(cmd.Args, flag) {
+			t.Fatalf("required window option %s missing: %v", flag, cmd.Args)
+		}
+	}
+	if slices.Contains(cmd.Args, "--verbose=2") {
+		t.Fatal("verbose VLC logging enabled without debug")
+	}
+	r.cfg.Debug = true
+	if !slices.Contains(r.playerCommand("camera").Args, "--verbose=2") {
+		t.Fatal("debug mode did not enable VLC logging")
+	}
+}
 
 func TestReceiverAPIRejectsWrongSecret(t *testing.T) {
 	r := &receiver{

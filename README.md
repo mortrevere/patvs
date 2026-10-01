@@ -119,6 +119,20 @@ patvs asks VLC to use DRM/KMS when `/dev/dri/card0` exists and framebuffer
 output when `/dev/fb0` exists.
 Receiver playback ignores saved VLC preferences and explicitly requests a
 standalone fullscreen video window with automatic scaling to fit the screen.
+The receiver's `--debug` flag also enables VLC's own verbose diagnostics.
+
+For testing under Hyprland 0.52, placement rules can override VLC's fullscreen
+request. Add these rules after general placement rules in your Hyprland config
+to target the receiver's `patvs-playback` window:
+
+```ini
+windowrule = fullscreen, initialTitle:^(patvs-playback)$
+windowrule = fullscreenstate 2 2, initialTitle:^(patvs-playback)$
+```
+
+Reload Hyprland with `hyprctl reload`, then stop and start receiver playback
+so the rule applies to a new window. Check `hyprctl clients` for the
+`patvs-playback` title and fullscreen state.
 
 On Raspberry Pi OS, HDMI works through the normal KMS setup. Composite output
 must be provisioned before installation by enabling the composite KMS overlay

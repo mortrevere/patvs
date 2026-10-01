@@ -554,10 +554,9 @@ func (r *receiver) saveSnapshot(id string, frame []byte) (string, error) {
 	return path, nil
 }
 
-func (r *receiver) startPlayer(id string) error {
-	r.stopPlayer()
+func (r *receiver) playerCommand(id string) *exec.Cmd {
 	url := "http://" + r.cfg.StreamAddr + "/streams/" + id + ".mjpg"
-	args := []string{"--ignore-config", "--intf=dummy", "--no-embedded-video", "--fullscreen", "--autoscale", "--no-video-title-show", "--network-caching=150", "--no-audio", url}
+	args := []string{"--ignore-config", "--intf=dummy", "--no-embedded-video", "--video-title=patvs-playback", "--fullscreen", "--autoscale", "--no-video-title-show", "--network-caching=150", "--no-audio", url}
 	if os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
 		_, drmErr := os.Stat("/dev/dri/card0")
 		_, fbErr := os.Stat("/dev/fb0")
@@ -570,8 +569,16 @@ func (r *receiver) startPlayer(id string) error {
 			args = append([]string{"--vout=fb", "--no-fb-tty", "--fbdev=/dev/fb0"}, args...)
 		}
 	}
-	cmd := exec.Command(r.cfg.Player, args...)
-	slog.Debug("starting player", "emitter_id", id, "executable", r.cfg.Player, "args", args, "display", os.Getenv("DISPLAY"), "wayland_display", os.Getenv("WAYLAND_DISPLAY"))
+	if r.cfg.Debug {
+		args = append([]string{"--verbose=2"}, args...)
+	}
+	return exec.Command(r.cfg.Player, args...)
+}
+
+func (r *receiver) startPlayer(id string) error {
+	r.stopPlayer()
+	cmd := r.playerCommand(id)
+	slog.Info("starting VLC", "emitter_id", id, "command", cmd.String(), "args", cmd.Args[1:], "display", os.Getenv("DISPLAY"), "wayland_display", os.Getenv("WAYLAND_DISPLAY"), "desktop", os.Getenv("XDG_CURRENT_DESKTOP"))
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	if err := cmd.Start(); err != nil {
 		slog.Warn("player start failed", "emitter_id", id, "executable", r.cfg.Player, "error", err)
