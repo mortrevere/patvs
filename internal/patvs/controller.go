@@ -96,6 +96,15 @@ func RunController(ctx context.Context, cfg Config) error {
 			return fmt.Errorf("usage: stop <receiver>")
 		}
 		return client.request(ctx, peer, http.MethodDelete, "/v1/playback", nil, nil)
+	case "delete":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: delete <receiver> <emitter>")
+		}
+		id, err := client.resolveEmitter(ctx, peer, args[1])
+		if err != nil {
+			return err
+		}
+		return client.request(ctx, peer, http.MethodDelete, "/v1/emitters/"+id, nil, nil)
 	default:
 		return fmt.Errorf("unknown controller command %q", command)
 	}
@@ -247,7 +256,12 @@ func sortedEmitters(source map[string]EmitterInfo) []EmitterInfo {
 	for _, emitter := range source {
 		result = append(result, emitter)
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Name == result[j].Name {
+			return result[i].ID < result[j].ID
+		}
+		return result[i].Name < result[j].Name
+	})
 	return result
 }
 

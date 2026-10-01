@@ -204,7 +204,10 @@ The controller starts its interactive terminal interface when no command is
 given. The receiver list shows each receiver's current feed and source, or
 `idle` when nothing is playing. Use ↑/↓ to select a receiver, Enter to open it,
 and ↑/↓ to select an emitter. Enter starts its feed and fullscreen VLC
-playback; `n` saves a snapshot, `x` stops VLC and its feed, Esc goes back, and
+playback; `n` saves a snapshot, `x` stops VLC and its feed, and `d` deletes the
+selected offline emitter from that receiver's saved state, including its
+stream/playback settings. Online emitters cannot be deleted; a forgotten emitter
+can register again if it reconnects. Esc goes back, and
 `k` stops background discovery. `r` refreshes once; `q` quits. The scan status
 stays visible at the bottom. The selected receiver screen also lists current
 FFmpeg and VLC processes on that host, with PIDs and command lines.
@@ -218,6 +221,7 @@ patvs controller snapshot <receiver> <emitter>
 patvs controller stream <receiver> <emitter> start|stop
 patvs controller play <receiver> <emitter>
 patvs controller stop <receiver>
+patvs controller delete <receiver> <emitter>
 ```
 
 The `stream` command is for clients that consume the receiver's loopback

@@ -159,6 +159,9 @@ func (m *tuiModel) action(command, emitterID string) tea.Cmd {
 			}
 		case "stop":
 			err = m.client.request(m.ctx, peer, http.MethodDelete, "/v1/playback", nil, nil)
+		case "delete":
+			err = m.client.request(m.ctx, peer, http.MethodDelete, "/v1/emitters/"+emitterID, nil, nil)
+			message = "Offline emitter deleted"
 		}
 		return tuiAction{receiverID: peer.ID, message: actionResult(message, err)}
 	}
@@ -286,7 +289,7 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.selected.ID != "" && m.emitterIndex+1 < len(m.status.Emitters) {
 				m.emitterIndex++
 			}
-		case "enter", "p", "n", "x":
+		case "enter", "p", "n", "x", "d":
 			if m.selected.ID == "" && msg.String() == "enter" && m.peerIndex < len(m.peers) {
 				m.selected = m.peers[m.peerIndex]
 				m.status = ReceiverStatus{}
@@ -308,6 +311,15 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			emitter := emitters[m.emitterIndex]
+			if msg.String() == "d" {
+				if emitter.Online {
+					m.message = emitter.Name + " is online; only offline emitters can be deleted"
+					break
+				}
+				m.working = true
+				m.message = "Deleting " + emitter.Name + "…"
+				return m, m.action("delete", emitter.ID)
+			}
 			if !emitter.Online {
 				m.message = emitter.Name + " is offline"
 				break
@@ -412,7 +424,7 @@ func (m *tuiModel) View() string {
 			}
 			fmt.Fprintf(&view, "    %s\n", string(command))
 		}
-		view.WriteString("\n↑/↓ select · Enter play in VLC · n snapshot · x stop playback\nEsc back · k stop scan · r refresh · q quit\n")
+		view.WriteString("\n↑/↓ select · Enter play in VLC · n snapshot · x stop playback\nd delete offline emitter · Esc back · k stop scan · r refresh · q quit\n")
 	}
 	fmt.Fprintf(&view, "\n%s\n", m.message)
 	if m.scanStopped {

@@ -18,6 +18,12 @@ emitter releases the previous one. `PUT /v1/streams/{id}` is a separate intent
 for clients reading the receiver's loopback MJPEG socket directly. Disabling
 that intent does not interrupt an active VLC selection.
 
+`DELETE /v1/emitters/{id}` forgets an offline emitter and persists removal of
+its stream/playback settings. It stops VLC if that emitter was selected and
+discards its cached frame; saved snapshots remain. Success returns `204`, an
+unknown ID returns `404`, and an online emitter or one with an active session
+returns `409`. Forgetting does not block a later emitter registration.
+
 `GET /v1/status` includes a fresh `processes` list of running local FFmpeg and
 VLC processes. Each entry has a PID, process name, and command line. The list
 may include processes unrelated to patvs; `player_pid` identifies the VLC

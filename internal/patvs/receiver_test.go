@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -76,6 +77,67 @@ func TestReceiverAPIRejectsWrongSecret(t *testing.T) {
 	r.apiHandler().ServeHTTP(response, request)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("got status %d, want %d", response.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestDeleteEmitter(t *testing.T) {
+	for _, test := range []struct {
+		name, id, secret             string
+		online, session, saveFailure bool
+		want                         int
+	}{
+		{name: "offline", id: "camera", secret: "secret", want: http.StatusNoContent},
+		{name: "unauthorized", id: "camera", secret: "wrong", want: http.StatusUnauthorized},
+		{name: "unknown", id: "missing", secret: "secret", want: http.StatusNotFound},
+		{name: "online", id: "camera", secret: "secret", online: true, want: http.StatusConflict},
+		{name: "connected but stale", id: "camera", secret: "secret", session: true, want: http.StatusConflict},
+		{name: "save failure", id: "camera", secret: "secret", saveFailure: true, want: http.StatusInternalServerError},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			r := testReceiver()
+			r.cfg.StatePath = filepath.Join(t.TempDir(), "receiver.json")
+			if test.saveFailure {
+				r.cfg.StatePath = t.TempDir() // Cannot replace a directory with the state file.
+			}
+			r.state.Emitters["camera"] = EmitterInfo{ID: "camera", Online: test.online}
+			r.state.Emitters["other"] = EmitterInfo{ID: "other"}
+			r.state.Streams["camera"], r.state.Streams["other"] = true, true
+			r.state.Playback = "camera"
+			r.latest["camera"] = []byte("cached frame")
+			r.playerTry, r.playerErr = 2, "old error"
+			if test.session {
+				r.sessions["camera"] = &emitterSession{}
+			}
+			request := httptest.NewRequest(http.MethodDelete, "/v1/emitters/"+test.id, nil)
+			request.Header.Set("Authorization", "Bearer "+test.secret)
+			response := httptest.NewRecorder()
+			r.apiHandler().ServeHTTP(response, request)
+			if response.Code != test.want {
+				t.Fatalf("got %d: %s, want %d", response.Code, response.Body.String(), test.want)
+			}
+			if test.saveFailure {
+				if !r.dirty {
+					t.Fatal("failed save was not marked for retry")
+				}
+				return
+			}
+			if test.want != http.StatusNoContent {
+				if len(r.state.Emitters) != 2 || !r.state.Streams["camera"] || r.state.Playback != "camera" || r.latest["camera"] == nil {
+					t.Fatal("rejected deletion changed receiver state")
+				}
+				return
+			}
+			var saved receiverDiskState
+			if err := loadJSON(r.cfg.StatePath, &saved); err != nil {
+				t.Fatal(err)
+			}
+			if len(saved.Emitters) != 1 || saved.Emitters["other"].ID != "other" || len(saved.Streams) != 1 || !saved.Streams["other"] || saved.Playback != "" {
+				t.Fatalf("incorrect persisted state: %#v", saved)
+			}
+			if r.latest["camera"] != nil || r.playerTry != 0 || r.playerErr != "" {
+				t.Fatal("cached frame or playback retry was not cleared")
+			}
+		})
 	}
 }
 

@@ -163,6 +163,7 @@ func (r *receiver) apiHandler() http.Handler {
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, r.state.Identity) })
 	mux.Handle("GET /v1/status", r.auth(http.HandlerFunc(r.handleStatus)))
 	mux.Handle("GET /v1/emitters", r.auth(http.HandlerFunc(r.handleEmitters)))
+	mux.Handle("DELETE /v1/emitters/{id}", r.auth(http.HandlerFunc(r.handleDeleteEmitter)))
 	mux.Handle("PUT /v1/streams/{id}", r.auth(http.HandlerFunc(r.handleStreamIntent)))
 	mux.Handle("POST /v1/snapshots/{id}", r.auth(http.HandlerFunc(r.handleSnapshot)))
 	mux.Handle("PUT /v1/playback", r.auth(http.HandlerFunc(r.handlePlayback)))
@@ -199,6 +200,46 @@ func (r *receiver) handleEmitters(w http.ResponseWriter, _ *http.Request) {
 	emitters := cloneEmitters(r.state.Emitters)
 	r.mu.RUnlock()
 	writeJSON(w, emitters)
+}
+
+func (r *receiver) handleDeleteEmitter(w http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+	r.mu.Lock()
+	emitter, known := r.state.Emitters[id]
+	if !known {
+		r.mu.Unlock()
+		http.Error(w, "unknown emitter", http.StatusNotFound)
+		return
+	}
+	if emitter.Online || r.sessions[id] != nil {
+		r.mu.Unlock()
+		http.Error(w, "emitter is online; only offline emitters can be deleted", http.StatusConflict)
+		return
+	}
+	delete(r.state.Emitters, id)
+	delete(r.state.Streams, id)
+	delete(r.latest, id)
+	wasPlayback := r.state.Playback == id
+	if wasPlayback {
+		r.state.Playback = ""
+		r.playerTry = 0
+		r.playerAt = time.Time{}
+		r.playerErr = ""
+	}
+	r.dirty = true
+	r.mu.Unlock()
+	if wasPlayback {
+		r.stopPlayer()
+	}
+	if err := r.save(); err != nil {
+		r.mu.Lock()
+		r.dirty = true
+		r.mu.Unlock()
+		http.Error(w, "save receiver state: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	slog.Info("offline emitter forgotten", "emitter_id", id, "name", emitter.Name)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (r *receiver) handleStreamIntent(w http.ResponseWriter, request *http.Request) {
