@@ -20,6 +20,7 @@ type Config struct {
 	SnapshotDir   string
 	Player        string
 	Debug         bool
+	Reset         bool
 	Args          []string
 }
 

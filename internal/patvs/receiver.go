@@ -37,7 +37,13 @@ func (s *emitterSession) send(message sessionMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_ = s.conn.SetWriteDeadline(time.Now().Add(3 * time.Second))
-	return s.conn.WriteJSON(message)
+	err := s.conn.WriteJSON(message)
+	if err != nil {
+		slog.Warn("send emitter command failed", "address", s.conn.RemoteAddr(), "command", message.Type, "error", err)
+	} else {
+		slog.Debug("emitter command sent", "address", s.conn.RemoteAddr(), "command", message.Type, "stream", message.Stream, "request", message.Request)
+	}
+	return err
 }
 
 type receiver struct {
@@ -57,6 +63,8 @@ type receiver struct {
 }
 
 func RunReceiver(ctx context.Context, cfg Config) error {
+	slog.Info("receiver starting", "name", cfg.Name, "state", cfg.StatePath, "discovery_port", cfg.DiscoveryPort)
+	defer slog.Info("receiver stopped")
 	r := &receiver{
 		cfg: cfg, sessions: make(map[string]*emitterSession), latest: make(map[string][]byte),
 		waiters: make(map[string][]chan []byte), listeners: make(map[string]map[chan []byte]struct{}), peers: make(map[string]ReceiverInfo),
@@ -72,6 +80,12 @@ func RunReceiver(ctx context.Context, cfg Config) error {
 		r.state.Identity = identity
 	}
 	r.state.Identity.Name = cfg.Name
+	if cfg.Reset {
+		slog.Info("forgetting remembered emitters and playback settings", "emitters", len(r.state.Emitters))
+		r.state.Emitters = nil
+		r.state.Streams = nil
+		r.state.Playback = ""
+	}
 	if r.state.Emitters == nil {
 		r.state.Emitters = make(map[string]EmitterInfo)
 	}
@@ -101,6 +115,7 @@ func RunReceiver(ctx context.Context, cfg Config) error {
 	slog.Info("receiver ready", "id", r.state.Identity.ID, "api", cfg.APIAddr, "streams", cfg.StreamAddr)
 	select {
 	case <-ctx.Done():
+		slog.Info("receiver shutting down")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 		defer cancel()
 		_ = api.Shutdown(shutdownCtx)
@@ -136,6 +151,7 @@ func (r *receiver) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		provided := strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer ")
 		if len(provided) != len(r.cfg.Secret) || subtle.ConstantTimeCompare([]byte(provided), []byte(r.cfg.Secret)) != 1 {
+			slog.Warn("unauthorized API request", "address", request.RemoteAddr, "method", request.Method, "path", request.URL.Path)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -187,6 +203,7 @@ func (r *receiver) handleStreamIntent(w http.ResponseWriter, request *http.Reque
 		http.Error(w, "unknown emitter", http.StatusNotFound)
 		return
 	}
+	slog.Info("stream requested", "emitter_id", id, "enabled", body.Enabled, "online", session != nil)
 	if session != nil {
 		_ = session.send(sessionMessage{Type: "demand", Stream: wantStream})
 	}
@@ -196,6 +213,7 @@ func (r *receiver) handleStreamIntent(w http.ResponseWriter, request *http.Reque
 
 func (r *receiver) handleSnapshot(w http.ResponseWriter, request *http.Request) {
 	id := request.PathValue("id")
+	slog.Info("snapshot requested", "emitter_id", id)
 	result := make(chan []byte, 1)
 	r.mu.Lock()
 	session := r.sessions[id]
@@ -204,6 +222,7 @@ func (r *receiver) handleSnapshot(w http.ResponseWriter, request *http.Request) 
 	}
 	r.mu.Unlock()
 	if session == nil {
+		slog.Warn("snapshot failed; emitter offline", "emitter_id", id)
 		http.Error(w, "emitter is offline", http.StatusServiceUnavailable)
 		return
 	}
@@ -216,12 +235,16 @@ func (r *receiver) handleSnapshot(w http.ResponseWriter, request *http.Request) 
 	case frame := <-result:
 		path, err := r.saveSnapshot(id, frame)
 		if err != nil {
+			slog.Warn("save snapshot failed", "emitter_id", id, "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		slog.Info("snapshot saved", "emitter_id", id, "path", path, "bytes", len(frame))
 		writeJSON(w, map[string]string{"path": path})
 	case <-request.Context().Done():
+		slog.Debug("snapshot request canceled", "emitter_id", id)
 	case <-time.After(10 * time.Second):
+		slog.Warn("snapshot timed out", "emitter_id", id)
 		http.Error(w, "snapshot timed out", http.StatusGatewayTimeout)
 	}
 }
@@ -241,6 +264,7 @@ func (r *receiver) handlePlayback(w http.ResponseWriter, request *http.Request) 
 		r.playerErr = ""
 		r.dirty = true
 		r.mu.Unlock()
+		slog.Info("playback stop requested", "emitter_id", old)
 		r.stopPlayer()
 		if session != nil {
 			_ = session.send(sessionMessage{Type: "demand", Stream: false})
@@ -277,6 +301,7 @@ func (r *receiver) handlePlayback(w http.ResponseWriter, request *http.Request) 
 		http.Error(w, "unknown emitter", http.StatusNotFound)
 		return
 	}
+	slog.Info("playback requested", "emitter_id", body.EmitterID, "previous_emitter_id", old, "online", session != nil)
 	if old != body.EmitterID && oldSession != nil {
 		_ = oldSession.send(sessionMessage{Type: "demand", Stream: false})
 	}
@@ -296,6 +321,7 @@ var upgrader = websocket.Upgrader{ReadBufferSize: 4096, WriteBufferSize: 4096, C
 func (r *receiver) handleSession(w http.ResponseWriter, request *http.Request) {
 	conn, err := upgrader.Upgrade(w, request, nil)
 	if err != nil {
+		slog.Warn("emitter session upgrade failed", "address", request.RemoteAddr, "error", err)
 		return
 	}
 	defer conn.Close()
@@ -303,12 +329,14 @@ func (r *receiver) handleSession(w http.ResponseWriter, request *http.Request) {
 	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	var register sessionMessage
 	if err := conn.ReadJSON(&register); err != nil || register.Type != "register" || register.ID == "" {
+		slog.Warn("invalid emitter registration", "address", request.RemoteAddr, "type", register.Type, "error", err)
 		return
 	}
 	session := &emitterSession{conn: conn}
 	now := time.Now()
 	r.mu.Lock()
 	if old := r.sessions[register.ID]; old != nil {
+		slog.Info("replacing emitter session", "emitter_id", register.ID)
 		_ = old.conn.Close()
 	}
 	r.sessions[register.ID] = session
@@ -327,7 +355,7 @@ func (r *receiver) handleSession(w http.ResponseWriter, request *http.Request) {
 	if wantPlayback {
 		_ = r.startPlayer(register.ID)
 	}
-	slog.Info("emitter connected", "id", register.ID, "name", register.Name)
+	slog.Info("emitter connected", "id", register.ID, "name", register.Name, "address", request.RemoteAddr, "camera", register.Camera, "stream", wantStream || wantPlayback)
 
 	defer func() {
 		r.mu.Lock()
@@ -339,12 +367,15 @@ func (r *receiver) handleSession(w http.ResponseWriter, request *http.Request) {
 			r.dirty = true
 		}
 		r.mu.Unlock()
+		slog.Info("emitter disconnected", "emitter_id", register.ID, "address", request.RemoteAddr)
 	}()
 
+	firstFrame := true
 	for {
 		_ = conn.SetReadDeadline(time.Now().Add(15 * time.Second))
 		kind, data, err := conn.ReadMessage()
 		if err != nil {
+			slog.Debug("emitter session read ended", "emitter_id", register.ID, "error", err)
 			return
 		}
 		switch kind {
@@ -355,13 +386,25 @@ func (r *receiver) handleSession(w http.ResponseWriter, request *http.Request) {
 			}
 			r.mu.Lock()
 			emitter := r.state.Emitters[register.ID]
+			if emitter.LastError != message.Error {
+				if message.Error != "" {
+					slog.Warn("emitter capture error", "emitter_id", register.ID, "error", message.Error)
+				} else {
+					slog.Info("emitter capture recovered", "emitter_id", register.ID)
+				}
+			}
 			emitter.Online, emitter.LastSeen, emitter.Camera, emitter.LastError = true, time.Now(), message.Camera, message.Error
 			r.state.Emitters[register.ID] = emitter
 			r.dirty = true
 			r.mu.Unlock()
 		case websocket.BinaryMessage:
 			if !validJPEGFrame(data) {
+				slog.Debug("invalid JPEG frame discarded", "emitter_id", register.ID, "bytes", len(data))
 				continue
+			}
+			if firstFrame {
+				slog.Debug("first frame received", "emitter_id", register.ID, "bytes", len(data))
+				firstFrame = false
 			}
 			r.acceptFrame(register.ID, data)
 		}
@@ -514,7 +557,7 @@ func (r *receiver) saveSnapshot(id string, frame []byte) (string, error) {
 func (r *receiver) startPlayer(id string) error {
 	r.stopPlayer()
 	url := "http://" + r.cfg.StreamAddr + "/streams/" + id + ".mjpg"
-	args := []string{"--intf=dummy", "--fullscreen", "--no-video-title-show", "--network-caching=150", "--no-audio", url}
+	args := []string{"--ignore-config", "--intf=dummy", "--no-embedded-video", "--fullscreen", "--autoscale", "--no-video-title-show", "--network-caching=150", "--no-audio", url}
 	if os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
 		_, drmErr := os.Stat("/dev/dri/card0")
 		_, fbErr := os.Stat("/dev/fb0")
@@ -528,8 +571,10 @@ func (r *receiver) startPlayer(id string) error {
 		}
 	}
 	cmd := exec.Command(r.cfg.Player, args...)
+	slog.Debug("starting player", "emitter_id", id, "executable", r.cfg.Player, "args", args, "display", os.Getenv("DISPLAY"), "wayland_display", os.Getenv("WAYLAND_DISPLAY"))
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	if err := cmd.Start(); err != nil {
+		slog.Warn("player start failed", "emitter_id", id, "executable", r.cfg.Player, "error", err)
 		r.mu.Lock()
 		r.playerErr = err.Error()
 		r.schedulePlayerRetryLocked()
@@ -540,10 +585,12 @@ func (r *receiver) startPlayer(id string) error {
 	r.player, r.playerErr = cmd, ""
 	r.playerAt = time.Time{}
 	r.mu.Unlock()
+	slog.Info("player started", "emitter_id", id, "player_pid", cmd.Process.Pid)
 	go func() {
 		err := cmd.Wait()
 		r.mu.Lock()
 		if r.player == cmd {
+			slog.Warn("player exited", "emitter_id", id, "player_pid", cmd.Process.Pid, "error", err)
 			r.player = nil
 			if err != nil {
 				r.playerErr = err.Error()
@@ -566,6 +613,7 @@ func (r *receiver) schedulePlayerRetryLocked() {
 	r.playerTry++
 	delay := time.Second << min(r.playerTry-1, 4)
 	r.playerAt = time.Now().Add(delay)
+	slog.Info("player retry scheduled", "emitter_id", r.state.Playback, "attempt", r.playerTry, "retry_delay", delay)
 }
 
 func (r *receiver) stopPlayer() {
@@ -574,6 +622,7 @@ func (r *receiver) stopPlayer() {
 	r.player = nil
 	r.mu.Unlock()
 	if cmd != nil && cmd.Process != nil {
+		slog.Info("player stopping", "player_pid", cmd.Process.Pid)
 		_ = cmd.Process.Signal(os.Interrupt)
 		time.AfterFunc(2*time.Second, func() { _ = cmd.Process.Kill() })
 	}
@@ -590,6 +639,7 @@ func (r *receiver) maintenance(ctx context.Context) {
 			r.mu.Lock()
 			for id, emitter := range r.state.Emitters {
 				if emitter.Online && time.Since(emitter.LastSeen) > 15*time.Second {
+					slog.Warn("emitter heartbeat timed out", "emitter_id", id, "last_seen", emitter.LastSeen)
 					emitter.Online, emitter.Streaming = false, false
 					r.state.Emitters[id] = emitter
 					r.dirty = true
@@ -622,9 +672,13 @@ func (r *receiver) discoverPeers(ctx context.Context) {
 	defer ticker.Stop()
 	for {
 		peers, _ := discover(ctx, r.cfg, 3*time.Second)
+		slog.Debug("receiver discovery completed", "receivers", len(peers))
 		r.mu.Lock()
 		for _, peer := range peers {
 			if peer.ID != r.state.Identity.ID && routableEndpoint(peer.Address) {
+				if old, ok := r.peers[peer.ID]; !ok || old.Address != peer.Address {
+					slog.Info("receiver peer discovered", "receiver_id", peer.ID, "receiver", peer.Name, "address", peer.Address)
+				}
 				r.peers[peer.ID] = peer
 			}
 		}
@@ -652,7 +706,11 @@ func (r *receiver) save() error {
 	state.Streams = cloneBools(r.state.Streams)
 	r.dirty = false
 	r.mu.Unlock()
-	return saveJSON(r.cfg.StatePath, state)
+	err := saveJSON(r.cfg.StatePath, state)
+	if err != nil {
+		slog.Warn("save receiver state failed", "path", r.cfg.StatePath, "error", err)
+	}
+	return err
 }
 
 func writeJSON(w http.ResponseWriter, value any) {

@@ -54,6 +54,21 @@ patvs controller --secret installation-secret
 custom shared value for an installation. Run any mode with `-h` for common
 options.
 
+Emitter and receiver logs go to stderr with timestamps, severity, mode, and
+process ID. They include discovery, connections, stream requests, snapshots,
+capture/player lifecycle, and failures. Add `--debug` for connection attempts,
+discovery counts, commands, first-frame delivery, and FFmpeg/VLC arguments:
+
+```sh
+patvs emitter --debug
+patvs receiver --debug
+journalctl -u patvs-emitter -u patvs-receiver -f
+```
+
+For installed services, add `--debug` to the unit's `ExecStart` using
+`systemctl edit`, then reload systemd and restart the service. Logs never
+include the shared secret or authorization header.
+
 The controller starts its interactive terminal interface when no command is
 given. The receiver list shows each receiver's current feed and source, or
 `idle` when nothing is playing. Use ↑/↓ to select a receiver, Enter to open it,
@@ -102,6 +117,8 @@ graphical login session to write its `DISPLAY`, `WAYLAND_DISPLAY`,
 `/run/patvs/display.env`, then restart `patvs-receiver`. Without those values,
 patvs asks VLC to use DRM/KMS when `/dev/dri/card0` exists and framebuffer
 output when `/dev/fb0` exists.
+Receiver playback ignores saved VLC preferences and explicitly requests a
+standalone fullscreen video window with automatic scaling to fit the screen.
 
 On Raspberry Pi OS, HDMI works through the normal KMS setup. Composite output
 must be provisioned before installation by enabling the composite KMS overlay
@@ -127,6 +144,14 @@ The default ports are TCP 7411 for the receiver API and emitter sessions, UDP
 7412 for discovery, and loopback TCP 7413 for received MJPEG streams. State is
 stored below `$XDG_STATE_HOME/patvs` or `~/.local/state/patvs`; emitter and
 receiver modes use separate files and can run together.
+
+Run `patvs emitter --reset` to forget remembered receivers on startup while
+keeping the emitter's device ID. Explicit seeds still apply, and discovery
+can find and remember receivers again.
+Run `patvs receiver --reset` to forget remembered emitters and clear their
+stream/playback settings while keeping the receiver's device ID and saved
+snapshots. The controller stores discovery results only in memory; restarting
+it already clears them.
 
 See [DEVPLAN.md](DEVPLAN.md) for milestones, acceptance criteria, and current
 implementation status. [docs/PROTOCOL.md](docs/PROTOCOL.md) records the local

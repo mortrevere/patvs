@@ -73,6 +73,9 @@ func run(args []string) error {
 	}
 	flags.StringVar(&cfg.Player, "player", player, "VLC executable path")
 	flags.BoolVar(&cfg.Debug, "debug", false, "enable debug logs")
+	if mode == "emitter" || mode == "receiver" {
+		flags.BoolVar(&cfg.Reset, "reset", false, "forget remembered peers and their settings on startup (keep device identity)")
+	}
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -86,7 +89,7 @@ func run(args []string) error {
 	if cfg.Debug {
 		level = slog.LevelDebug
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})).With("mode", mode, "pid", os.Getpid()))
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 

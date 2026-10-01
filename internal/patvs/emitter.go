@@ -21,6 +21,8 @@ type emitterDiskState struct {
 }
 
 func RunEmitter(ctx context.Context, cfg Config) error {
+	slog.Info("emitter starting", "name", cfg.Name, "state", cfg.StatePath, "camera", cfg.Camera, "discovery_port", cfg.DiscoveryPort)
+	defer slog.Info("emitter stopped")
 	var state emitterDiskState
 	if err := loadJSON(cfg.StatePath, &state); err != nil {
 		return err
@@ -33,6 +35,10 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 		state.Identity = identity
 	}
 	state.Identity.Name = cfg.Name
+	if cfg.Reset {
+		slog.Info("forgetting remembered receivers", "receivers", len(state.Receivers))
+		state.Receivers = nil
+	}
 	if state.Receivers == nil {
 		state.Receivers = make(map[string]ReceiverInfo)
 	}
@@ -49,6 +55,7 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 		camera = Camera{Device: cfg.Camera}
 	}
 	manager := newCaptureManager(cfg, camera)
+	slog.Info("emitter ready", "id", identity.ID, "camera", camera, "seeds", cfg.Seeds)
 	hints := make(chan ReceiverInfo, 32)
 	type activeSession struct {
 		address string
@@ -68,6 +75,7 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 			return
 		}
 		state.Receivers[peer.ID] = peer
+		slog.Info("receiver discovered", "receiver_id", peer.ID, "receiver", peer.Name, "address", peer.Address)
 		if err := saveJSON(cfg.StatePath, state); err != nil {
 			slog.Warn("save remembered receiver", "error", err)
 		}
@@ -75,6 +83,7 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 	for {
 		select {
 		case <-ctx.Done():
+			slog.Info("emitter shutting down")
 			mu.Lock()
 			for _, session := range active {
 				session.cancel()
@@ -110,6 +119,7 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 			mu.Unlock()
 		case <-discoverNow:
 			peers, _ := discover(ctx, cfg, 2200*time.Millisecond)
+			slog.Debug("emitter discovery completed", "receivers", len(peers))
 			for _, peer := range peers {
 				remember(peer)
 				mu.Lock()
@@ -155,12 +165,13 @@ func appendUnique(values []string, value string) []string {
 func runEmitterSession(ctx context.Context, cfg Config, identity Identity, manager *captureManager, peer ReceiverInfo, hints chan<- ReceiverInfo) {
 	delay := 250 * time.Millisecond
 	for attempt := 0; ctx.Err() == nil && attempt < 3; attempt++ {
+		slog.Debug("connecting to receiver", "receiver_id", peer.ID, "receiver", peer.Name, "address", peer.Address, "attempt", attempt+1)
 		err := connectEmitter(ctx, cfg, identity, manager, peer, hints)
 		if ctx.Err() != nil {
 			return
 		}
-		slog.Debug("receiver session ended", "receiver", peer.Name, "error", err)
 		jitter := time.Duration(rand.IntN(200)) * time.Millisecond
+		slog.Warn("receiver session ended; retrying", "receiver_id", peer.ID, "receiver", peer.Name, "address", peer.Address, "attempt", attempt+1, "retry_delay", delay+jitter, "error", err)
 		select {
 		case <-ctx.Done():
 			return
@@ -172,6 +183,9 @@ func runEmitterSession(ctx context.Context, cfg Config, identity Identity, manag
 				delay = 5 * time.Second
 			}
 		}
+	}
+	if ctx.Err() == nil {
+		slog.Debug("receiver session retries exhausted; rediscovering", "receiver_id", peer.ID, "address", peer.Address)
 	}
 }
 
@@ -195,7 +209,8 @@ func connectEmitter(ctx context.Context, cfg Config, identity Identity, manager 
 	if err := conn.WriteJSON(sessionMessage{Type: "register", ID: identity.ID, Name: identity.Name, Camera: manager.camera}); err != nil {
 		return err
 	}
-	slog.Info("connected to receiver", "receiver", peer.Name, "address", peer.Address)
+	slog.Info("connected to receiver", "receiver_id", peer.ID, "receiver", peer.Name, "address", peer.Address)
+	defer slog.Info("disconnected from receiver", "receiver_id", peer.ID, "address", peer.Address)
 	commands := make(chan sessionMessage, 4)
 	readErr := make(chan error, 1)
 	go func() {
@@ -215,6 +230,7 @@ func connectEmitter(ctx context.Context, cfg Config, identity Identity, manager 
 	heartbeat := time.NewTicker(5 * time.Second)
 	defer heartbeat.Stop()
 	streaming, snapshots := false, 0
+	firstFrame := true
 	for {
 		select {
 		case <-ctx.Done():
@@ -222,6 +238,7 @@ func connectEmitter(ctx context.Context, cfg Config, identity Identity, manager 
 		case err := <-readErr:
 			return err
 		case command := <-commands:
+			slog.Debug("receiver command received", "receiver_id", peer.ID, "command", command.Type, "stream", command.Stream, "request", command.Request, "peers", len(command.Receivers))
 			for _, hintedPeer := range command.Receivers {
 				if hintedPeer.ID == "" || hintedPeer.ID == peer.ID || !routableEndpoint(hintedPeer.Address) {
 					continue
@@ -233,9 +250,13 @@ func connectEmitter(ctx context.Context, cfg Config, identity Identity, manager 
 			}
 			switch command.Type {
 			case "demand":
+				if streaming != command.Stream {
+					slog.Info("stream demand changed", "receiver_id", peer.ID, "enabled", command.Stream)
+				}
 				streaming = command.Stream
 			case "snapshot":
 				snapshots++
+				slog.Info("snapshot requested", "receiver_id", peer.ID, "request", command.Request, "pending", snapshots)
 			}
 			manager.setDemand(key, streaming || snapshots > 0)
 		case frame := <-frames:
@@ -245,6 +266,10 @@ func connectEmitter(ctx context.Context, cfg Config, identity Identity, manager 
 			_ = conn.SetWriteDeadline(time.Now().Add(3 * time.Second))
 			if err := conn.WriteMessage(websocket.BinaryMessage, frame); err != nil {
 				return err
+			}
+			if firstFrame {
+				slog.Debug("first frame sent", "receiver_id", peer.ID, "bytes", len(frame))
+				firstFrame = false
 			}
 			if snapshots > 0 {
 				snapshots--

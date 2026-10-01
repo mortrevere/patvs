@@ -174,6 +174,7 @@ func (m *captureManager) stopIfIdleLocked() {
 		}
 	}
 	if m.cancel != nil {
+		slog.Info("camera capture stopping; no active demand", "device", m.camera.Device)
 		m.cancel()
 		m.cancel = nil
 	}
@@ -208,6 +209,7 @@ func (m *captureManager) captureOnce(ctx context.Context) error {
 		m.mu.Unlock()
 	}
 	args := ffmpegArgs(m.camera)
+	slog.Debug("starting camera capture", "device", m.camera.Device, "args", args)
 	command := exec.CommandContext(ctx, "ffmpeg", args...)
 	stdout, err := command.StdoutPipe()
 	if err != nil {
@@ -218,6 +220,8 @@ func (m *captureManager) captureOnce(ctx context.Context) error {
 	if err := command.Start(); err != nil {
 		return err
 	}
+	slog.Info("camera capture started", "device", m.camera.Device, "capture_pid", command.Process.Pid)
+	defer slog.Info("camera capture stopped", "device", m.camera.Device, "capture_pid", command.Process.Pid)
 	err = readJPEGFrames(ctx, stdout, m.broadcast)
 	if waitErr := command.Wait(); err == nil {
 		err = waitErr
