@@ -8,6 +8,8 @@ on:
       - go.mod
       - go.sum
       - scripts/build.sh
+      - scripts/download-ffmpeg.sh
+      - docs/FFMPEG.md
       - .github/workflows/release.yml
 
 permissions:
@@ -41,13 +43,17 @@ jobs:
           cache-dependency-path: go.sum
       - name: Build binaries
         run: ./scripts/build.sh
+      - name: Download verified Windows FFmpeg archives
+        run: ./scripts/download-ffmpeg.sh
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$VERSION" dist/patvs-linux-* \
             dist/patvs-windows-amd64.exe dist/patvs-windows-arm64.exe dist/SHA256SUMS \
+            dist/ffmpeg-windows-amd64.zip dist/ffmpeg-windows-arm64.zip dist/FFMPEG.md \
             --target "$GITHUB_SHA" \
             --title "patvs $VERSION" \
             --latest \
+            --notes-file docs/FFMPEG.md \
             --generate-notes
