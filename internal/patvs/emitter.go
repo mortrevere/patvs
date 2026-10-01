@@ -15,6 +15,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const maxReceiverReconnectAttempts = 10
+
 type emitterDiskState struct {
 	Identity  Identity                `json:"identity"`
 	Receivers map[string]ReceiverInfo `json:"receivers,omitempty"`
@@ -42,9 +44,6 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 	if state.Receivers == nil {
 		state.Receivers = make(map[string]ReceiverInfo)
 	}
-	for _, peer := range state.Receivers {
-		cfg.Seeds = appendUnique(cfg.Seeds, peer.Address)
-	}
 	if err := saveJSON(cfg.StatePath, state); err != nil {
 		return err
 	}
@@ -57,12 +56,14 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 	manager := newCaptureManager(cfg, camera)
 	slog.Info("emitter ready", "id", identity.ID, "camera", camera, "seeds", cfg.Seeds)
 	hints := make(chan ReceiverInfo, 32)
-	type activeSession struct {
-		address string
-		cancel  context.CancelFunc
+	type sessionResult struct {
+		peer     ReceiverInfo
+		failures int
 	}
-	active := make(map[string]activeSession)
-	var mu sync.Mutex
+	results := make(chan sessionResult)
+	active := make(map[string]context.CancelFunc)
+	failures := make(map[string]int)
+	forgotten := make(map[string]string)
 	var wg sync.WaitGroup
 	discoverTicker := time.NewTicker(3 * time.Second)
 	defer discoverTicker.Stop()
@@ -74,21 +75,40 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 		if exists && old.Address == peer.Address && old.Name == peer.Name {
 			return
 		}
+		if old.Address != peer.Address {
+			delete(failures, peer.ID)
+		}
 		state.Receivers[peer.ID] = peer
 		slog.Info("receiver discovered", "receiver_id", peer.ID, "receiver", peer.Name, "address", peer.Address)
 		if err := saveJSON(cfg.StatePath, state); err != nil {
 			slog.Warn("save remembered receiver", "error", err)
 		}
 	}
+	startSession := func(peer ReceiverInfo) {
+		if _, found := active[peer.ID]; found {
+			return
+		}
+		sessionCtx, cancel := context.WithCancel(ctx)
+		active[peer.ID] = cancel
+		previousFailures := failures[peer.ID]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer cancel()
+			count := runEmitterSession(sessionCtx, cfg, identity, manager, peer, hints, previousFailures)
+			select {
+			case results <- sessionResult{peer: peer, failures: count}:
+			case <-ctx.Done():
+			}
+		}()
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			slog.Info("emitter shutting down")
-			mu.Lock()
-			for _, session := range active {
-				session.cancel()
+			for _, cancel := range active {
+				cancel()
 			}
-			mu.Unlock()
 			wg.Wait()
 			manager.captureWG.Wait()
 			return nil
@@ -97,55 +117,46 @@ func RunEmitter(ctx context.Context, cfg Config) error {
 			case discoverNow <- struct{}{}:
 			default:
 			}
-		case peer := <-hints:
-			remember(peer)
-			mu.Lock()
-			_, found := active[peer.ID]
-			if !found {
-				sessionCtx, cancel := context.WithCancel(ctx)
-				active[peer.ID] = activeSession{address: peer.Address, cancel: cancel}
-				wg.Add(1)
-				go func(peer ReceiverInfo) {
-					defer wg.Done()
-					runEmitterSession(sessionCtx, cfg, identity, manager, peer, hints)
-					mu.Lock()
-					delete(active, peer.ID)
-					mu.Unlock()
-					select {
-					case discoverNow <- struct{}{}:
-					default:
-					}
-				}(peer)
+		case result := <-results:
+			peer := result.peer
+			delete(active, peer.ID)
+			if current, ok := state.Receivers[peer.ID]; !ok || current.Address != peer.Address {
+				continue
 			}
-			mu.Unlock()
+			failures[peer.ID] = result.failures
+			if result.failures >= maxReceiverReconnectAttempts {
+				delete(state.Receivers, peer.ID)
+				delete(failures, peer.ID)
+				forgotten[peer.ID] = peer.Address
+				slog.Info("forgetting unreachable receiver", "receiver_id", peer.ID, "address", peer.Address, "attempts", result.failures)
+				if err := saveJSON(cfg.StatePath, state); err != nil {
+					slog.Warn("save remembered receiver", "error", err)
+				}
+			}
+			select {
+			case discoverNow <- struct{}{}:
+			default:
+			}
+		case peer := <-hints:
+			if forgotten[peer.ID] == peer.Address {
+				continue
+			}
+			remember(peer)
+			startSession(peer)
 		case <-discoverNow:
-			peers, _ := discover(ctx, cfg, 2200*time.Millisecond)
+			discoveryCfg := cfg
+			discoveryCfg.Seeds = append([]string(nil), cfg.Seeds...)
+			for _, peer := range state.Receivers {
+				discoveryCfg.Seeds = appendUnique(discoveryCfg.Seeds, peer.Address)
+			}
+			peers, _ := discover(ctx, discoveryCfg, 2200*time.Millisecond)
 			slog.Debug("emitter discovery completed", "receivers", len(peers))
 			for _, peer := range peers {
+				delete(forgotten, peer.ID)
 				remember(peer)
-				mu.Lock()
-				_, found := active[peer.ID]
-				if found {
-					mu.Unlock()
-					continue
-				}
-				sessionCtx, cancel := context.WithCancel(ctx)
-				active[peer.ID] = activeSession{address: peer.Address, cancel: cancel}
-				mu.Unlock()
-				wg.Add(1)
-				go func(peer ReceiverInfo) {
-					defer wg.Done()
-					runEmitterSession(sessionCtx, cfg, identity, manager, peer, hints)
-					mu.Lock()
-					if current, ok := active[peer.ID]; ok && current.address == peer.Address {
-						delete(active, peer.ID)
-					}
-					mu.Unlock()
-					select {
-					case discoverNow <- struct{}{}:
-					default:
-					}
-				}(peer)
+			}
+			for _, peer := range state.Receivers {
+				startSession(peer)
 			}
 		}
 	}
@@ -163,19 +174,27 @@ func appendUnique(values []string, value string) []string {
 	return append(values, value)
 }
 
-func runEmitterSession(ctx context.Context, cfg Config, identity Identity, manager *captureManager, peer ReceiverInfo, hints chan<- ReceiverInfo) {
+func runEmitterSession(ctx context.Context, cfg Config, identity Identity, manager *captureManager, peer ReceiverInfo, hints chan<- ReceiverInfo, failures int) int {
 	delay := 250 * time.Millisecond
-	for attempt := 0; ctx.Err() == nil && attempt < 3; attempt++ {
-		slog.Debug("connecting to receiver", "receiver_id", peer.ID, "receiver", peer.Name, "address", peer.Address, "attempt", attempt+1)
-		err := connectEmitter(ctx, cfg, identity, manager, peer, hints)
+	for attempt := 0; ctx.Err() == nil && attempt < 3 && failures < maxReceiverReconnectAttempts; attempt++ {
+		slog.Debug("connecting to receiver", "receiver_id", peer.ID, "receiver", peer.Name, "address", peer.Address, "attempt", failures+1)
+		connected, err := connectEmitter(ctx, cfg, identity, manager, peer, hints)
 		if ctx.Err() != nil {
-			return
+			return failures
+		}
+		if connected {
+			failures = 0
+		} else {
+			failures++
+		}
+		if failures >= maxReceiverReconnectAttempts {
+			break
 		}
 		jitter := time.Duration(rand.IntN(200)) * time.Millisecond
-		slog.Warn("receiver session ended; retrying", "receiver_id", peer.ID, "receiver", peer.Name, "address", peer.Address, "attempt", attempt+1, "retry_delay", delay+jitter, "error", err)
+		slog.Warn("receiver session ended; retrying", "receiver_id", peer.ID, "receiver", peer.Name, "address", peer.Address, "failed_attempts", failures, "retry_delay", delay+jitter, "error", err)
 		select {
 		case <-ctx.Done():
-			return
+			return failures
 		case <-time.After(delay + jitter):
 		}
 		if delay < 5*time.Second {
@@ -188,9 +207,10 @@ func runEmitterSession(ctx context.Context, cfg Config, identity Identity, manag
 	if ctx.Err() == nil {
 		slog.Debug("receiver session retries exhausted; rediscovering", "receiver_id", peer.ID, "address", peer.Address)
 	}
+	return failures
 }
 
-func connectEmitter(ctx context.Context, cfg Config, identity Identity, manager *captureManager, peer ReceiverInfo, hints chan<- ReceiverInfo) error {
+func connectEmitter(ctx context.Context, cfg Config, identity Identity, manager *captureManager, peer ReceiverInfo, hints chan<- ReceiverInfo) (bool, error) {
 	endpoint := url.URL{Scheme: "ws", Host: peer.Address, Path: "/v1/session"}
 	header := http.Header{"Authorization": []string{"Bearer " + cfg.Secret}}
 	dialer := *websocket.DefaultDialer
@@ -199,16 +219,16 @@ func connectEmitter(ctx context.Context, cfg Config, identity Identity, manager 
 	conn, response, err := dialer.DialContext(ctx, endpoint.String(), header)
 	if err != nil {
 		if response != nil {
-			return fmt.Errorf("connect to %s: %s", peer.Address, response.Status)
+			return false, fmt.Errorf("connect to %s: %s", peer.Address, response.Status)
 		}
-		return err
+		return false, err
 	}
 	defer conn.Close()
 	key := peer.ID + "@" + peer.Address
 	frames := manager.add(key)
 	defer manager.remove(key)
 	if err := conn.WriteJSON(sessionMessage{Type: "register", ID: identity.ID, Name: identity.Name, Camera: manager.camera}); err != nil {
-		return err
+		return false, err
 	}
 	slog.Info("connected to receiver", "receiver_id", peer.ID, "receiver", peer.Name, "address", peer.Address)
 	defer slog.Info("disconnected from receiver", "receiver_id", peer.ID, "address", peer.Address)
@@ -235,9 +255,9 @@ func connectEmitter(ctx context.Context, cfg Config, identity Identity, manager 
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return true, ctx.Err()
 		case err := <-readErr:
-			return err
+			return true, err
 		case command := <-commands:
 			slog.Debug("receiver command received", "receiver_id", peer.ID, "command", command.Type, "stream", command.Stream, "request", command.Request, "peers", len(command.Receivers))
 			for _, hintedPeer := range command.Receivers {
@@ -266,7 +286,7 @@ func connectEmitter(ctx context.Context, cfg Config, identity Identity, manager 
 			}
 			_ = conn.SetWriteDeadline(time.Now().Add(3 * time.Second))
 			if err := conn.WriteMessage(websocket.BinaryMessage, frame); err != nil {
-				return err
+				return true, err
 			}
 			if firstFrame {
 				slog.Debug("first frame sent", "receiver_id", peer.ID, "bytes", len(frame))
@@ -283,7 +303,7 @@ func connectEmitter(ctx context.Context, cfg Config, identity Identity, manager 
 			manager.mu.Unlock()
 			_ = conn.SetWriteDeadline(time.Now().Add(3 * time.Second))
 			if err := conn.WriteJSON(sessionMessage{Type: "heartbeat", Camera: camera, Error: strings.TrimSpace(captureErr)}); err != nil {
-				return err
+				return true, err
 			}
 		}
 	}

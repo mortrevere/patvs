@@ -294,6 +294,10 @@ stored below `$XDG_STATE_HOME/patvs` or `~/.local/state/patvs` on Linux and
 `%LOCALAPPDATA%\patvs` on Windows; emitter and
 receiver modes use separate files and can run together.
 
+Emitters forget remembered receivers after 10 consecutive failed connection
+attempts. Successful connections reset the count; discovery can find forgotten
+receivers again.
+
 Run `patvs emitter --reset` to forget remembered receivers on startup while
 keeping the emitter's device ID. Explicit seeds still apply, and discovery
 can find and remember receivers again.
