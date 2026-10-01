@@ -436,11 +436,11 @@ Acceptance targets on a healthy small LAN:
   MJPEG streams, real VLC playback/process inspection, and the integrated
   DirectShow webcam at 640x480 YUYV/30 fps. The webcam was returned to WSL.
 - The Windows controller discovers Black and Blue at `10.0.0.29` and `.30`.
-  Windows emitter snapshots succeed on both Linux receivers. Inbound LAN
-  connections to the Windows test receiver did not succeed. Initial checks
-  found a Public-profile firewall block; user approvals changed it to Allow,
-  but field emitters still did not connect. Wi-Fi IPv6 is disabled. Local
-  Windows receiver and playback tests pass; inbound LAN acceptance remains
-  outstanding. The agent did not alter host network settings.
+  After the user approved the Windows firewall prompts, the final LAN check
+  on standard ports passed in both directions: both Linux cameras registered
+  with Windows and delivered snapshots, Black's feed played in native Windows
+  VLC, and the Windows emitter delivered snapshots to both Linux receivers.
+  All temporary test processes and playback requests were stopped. Host Wi-Fi
+  IPv6 is disabled, so Windows IPv6 field acceptance remains unverified.
 - Windows ARM64 is cross-built and vetted; native ARM64 hardware acceptance
   remains outstanding.
