@@ -1,17 +1,19 @@
 ## Windows FFmpeg downloads
 
-Windows emitters need FFmpeg. Download `ffmpeg-windows-amd64.zip` alongside
-`patvs-windows-amd64.exe`, or use the two `arm64` downloads for Windows on ARM.
-Extract the FFmpeg archive and put its `bin/ffmpeg.exe` beside the patvs
-executable, or add its `bin` directory to `PATH`. Keep the archive's license and
-documentation. Controllers only need patvs; receivers also need
+Windows emitters need FFmpeg. Download `ffmpeg.exe` alongside
+`patvs-windows-amd64.exe`, or use `ffmpeg-arm64.exe` with
+`patvs-windows-arm64.exe` for Windows on ARM and rename it to `ffmpeg.exe`.
+Put FFmpeg beside the patvs executable or on `PATH`, and keep the release's
+`FFMPEG-LICENSE.txt` with it. Controllers only need patvs; receivers also need
 [VLC](https://www.videolan.org/vlc/).
 
 These are unmodified static LGPL builds from
 [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds), a Windows build
 provider linked on [FFmpeg's download page](https://ffmpeg.org/download.html).
-The release workflow downloads them over HTTPS and checks their pinned SHA-256
-hashes before publishing; `SHA256SUMS` covers both ZIP files. No FFmpeg download
+The release workflow downloads upstream archives over HTTPS and checks their
+pinned SHA-256 hashes before extracting only `bin/ffmpeg.exe` and `LICENSE.txt`.
+The executable bytes are unchanged; `SHA256SUMS` covers both executables and
+the license. No FFmpeg download
 occurs when running patvs or doing a normal local build.
 
 Upstream version and source references:
@@ -24,5 +26,5 @@ Upstream version and source references:
   builds the selected variant. Use the FFmpeg commit above when reproducing
   this binary, rather than the moving `release/9.0` branch.
 
-The included `LICENSE.txt` contains LGPLv3. FFmpeg is distributed separately
+The included `FFMPEG-LICENSE.txt` contains LGPLv3. FFmpeg is distributed separately
 from patvs and executed as a subprocess.

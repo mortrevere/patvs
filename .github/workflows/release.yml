@@ -43,7 +43,7 @@ jobs:
           cache-dependency-path: go.sum
       - name: Build binaries
         run: ./scripts/build.sh
-      - name: Download verified Windows FFmpeg archives
+      - name: Extract verified Windows FFmpeg executables
         run: ./scripts/download-ffmpeg.sh
       - name: Publish release
         env:
@@ -51,9 +51,9 @@ jobs:
         run: |
           gh release create "$VERSION" dist/patvs-linux-* \
             dist/patvs-windows-amd64.exe dist/patvs-windows-arm64.exe dist/SHA256SUMS \
-            dist/ffmpeg-windows-amd64.zip dist/ffmpeg-windows-arm64.zip dist/FFMPEG.md \
+            dist/ffmpeg.exe dist/ffmpeg-arm64.exe dist/FFMPEG-LICENSE.txt \
             --target "$GITHUB_SHA" \
             --title "patvs $VERSION" \
             --latest \
-            --notes-file docs/FFMPEG.md \
+            --notes 'FFmpeg executables: unmodified LGPL builds from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds/releases/tag/autobuild-2026-09-30-13-08).' \
             --generate-notes

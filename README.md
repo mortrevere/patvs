@@ -37,7 +37,7 @@ VERSION=0.1.0 SEEDS=receiver.example.net:7411 ./scripts/build.sh
 GitHub Actions runs tests and publishes these binaries and `SHA256SUMS` as a
 release on pushes to any branch that change Go files, `go.mod`, `go.sum`, the
 build scripts, FFmpeg notices, or the release workflow. The Linux release job
-also downloads pinned, checksum-verified Windows FFmpeg archives; see
+also extracts Windows FFmpeg executables from pinned, checksum-verified archives; see
 [FFmpeg downloads and source references](docs/FFMPEG.md). Native Linux and
 Windows tests must pass before publishing. Releases use unique
 `build-<run number>-<attempt>` tags pointing to the pushed commit.
@@ -71,9 +71,9 @@ Invoke-WebRequest https://github.com/mortrevere/patvs/releases/latest/download/p
 Run each mode in its own terminal. The controller works in PowerShell, Command
 Prompt, and Windows Terminal. Controllers only need patvs. Emitters need a
 Windows FFmpeg build with [DirectShow support](https://ffmpeg.org/ffmpeg-devices.html#dshow);
-download `ffmpeg-windows-amd64.zip` (or `ffmpeg-windows-arm64.zip`) from the
-same release, extract it, and put its `bin/ffmpeg.exe` on `PATH` or beside
-`patvs.exe`. Keep the archive's license and documentation. Receivers find VLC
+download `ffmpeg.exe` from the same release (or `ffmpeg-arm64.exe` for Windows
+on ARM and rename it to `ffmpeg.exe`). Put it on `PATH` or beside `patvs.exe`,
+and keep `FFMPEG-LICENSE.txt` with it. Receivers find VLC
 on `PATH`, beside patvs, or in its standard `Program Files/VideoLAN/VLC` installation.
 Use `--player 'C:\custom path\vlc.exe'` to override this.
 

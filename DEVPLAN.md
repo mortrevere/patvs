@@ -444,8 +444,9 @@ Acceptance targets on a healthy small LAN:
   IPv6 is disabled, so Windows IPv6 field acceptance remains unverified.
 - Windows ARM64 is cross-built and vetted; native ARM64 hardware acceptance
   remains outstanding.
-- Releases also carry unmodified BtbN static LGPL FFmpeg ZIPs for both Windows
-  architectures, with license/docs intact and exact source/build references.
+- Releases also carry only the unmodified BtbN static LGPL `ffmpeg.exe` for
+  each Windows architecture, with a license file and source/build references
+  in the repository. Release notes use one line crediting the upstream build.
   The Linux release job downloads a pinned month-end build and rejects a
   SHA-256 mismatch before publishing. Its FFmpeg passed native Windows
   synthetic snapshots/streaming; a corrupted-download check was rejected.
