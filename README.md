@@ -2,7 +2,8 @@
 
 Portable All Terrain Video Streaming routes Linux and Windows camera feeds between
 unattended machines on an installation network. One executable runs as an
-emitter, receiver, or controller.
+emitter and receiver together by default, or as an explicit emitter, receiver,
+or controller.
 
 ## Architecture
 
@@ -108,13 +109,15 @@ Download `patvs-windows-amd64.exe` from the same release (or
 
 ```powershell
 Invoke-WebRequest https://github.com/mortrevere/patvs/releases/latest/download/patvs-windows-amd64.exe -OutFile patvs.exe
-./patvs.exe controller
-./patvs.exe receiver
-./patvs.exe emitter
+./patvs.exe             # receiver and emitter together
+./patvs.exe controller  # controller in another terminal
+./patvs.exe receiver    # receiver only
+./patvs.exe emitter     # emitter only
 ```
 
-Run each mode in its own terminal. The controller works in PowerShell, Command
-Prompt, and Windows Terminal. Controllers only need patvs. Emitters need a
+The default launch runs both roles in one process. Run the controller in its
+own terminal. PowerShell, Command Prompt, and Windows Terminal are supported.
+Controllers only need patvs. Emitters need a
 Windows FFmpeg build with [DirectShow support](https://ffmpeg.org/ffmpeg-devices.html#dshow);
 download `ffmpeg.exe` from the same release (or `ffmpeg-arm64.exe` for Windows
 on ARM and rename it to `ffmpeg.exe`). Put it on `PATH` or beside `patvs.exe`,
@@ -143,11 +146,12 @@ discovery replies. TCP 7413 stays on loopback. If broadcast is blocked, pass
 Windows and Linux machines use the same commands, shared secret, and protocol.
 
 State and snapshots default to `%LOCALAPPDATA%\patvs`; `--state` and
-`--snapshot-dir` override these paths. Ctrl+C shuts down a mode and its managed
-media processes. For unattended desktop playback, create a Task Scheduler
-task at user logon, select **Run only when user is logged on**, set the program
-to the full path of `patvs.exe`, and give it `receiver` arguments. Create a
-separate task for `emitter` if needed; configure restart on failure. Use
+`--snapshot-dir` override these paths. Ctrl+C shuts down the running roles and
+their managed media processes. A fatal error in either role stops both in
+combined mode. For unattended desktop playback, create a Task Scheduler task
+at user logon, select **Run only when user is logged on**, set the program to
+the full path of `patvs.exe`, and leave the arguments empty to run both roles,
+or give it `receiver` or `emitter` arguments for a single role. Configure restart on failure. Use
 `PATVS_SECRET` or `--secret` to match the Linux installation. Receiver VLC
 playback needs an interactive Windows desktop session.
 
@@ -165,18 +169,23 @@ source. The test uses temporary state and ports and stops its own processes.
 ## Run
 
 ```sh
+patvs --secret installation-secret  # receiver and emitter together
 patvs receiver --secret installation-secret
 patvs emitter --secret installation-secret
 patvs controller --secret installation-secret
 ```
 
 `--secret` defaults to `patvs` for immediate setup on a trusted LAN. Use a
-custom shared value for an installation. Run any mode with `-h` for common
-options.
+custom shared value for an installation. Running `patvs` with no arguments
+starts both roles, including when launching the Windows executable directly.
+Options without a mode apply to both roles; for example,
+`patvs --camera auto --display-aspect-ratio 4:3`. Run `patvs --help` or any
+explicit mode with `-h` for options.
 
 Emitter and receiver logs go to stderr with timestamps, severity, mode, and
-process ID. They include discovery, connections, stream requests, snapshots,
-capture/player lifecycle, and failures. Add `--debug` for connection attempts,
+process ID (`mode=both` for the default combined process). They include
+discovery, connections, stream requests, snapshots, capture/player lifecycle,
+and failures. Add `--debug` for connection attempts,
 discovery counts, commands, first-frame delivery, and FFmpeg/VLC arguments:
 
 ```sh
@@ -292,7 +301,12 @@ The default ports are TCP 7411 for the receiver API and emitter sessions, UDP
 7412 for discovery, and loopback TCP 7413 for received MJPEG streams. State is
 stored below `$XDG_STATE_HOME/patvs` or `~/.local/state/patvs` on Linux and
 `%LOCALAPPDATA%\patvs` on Windows; emitter and
-receiver modes use separate files and can run together.
+receiver modes use separate files and identities. The default combined launch
+reuses those same files. In combined mode, `--state /path/node.json` selects
+`/path/node-receiver.json` and `/path/node-emitter.json`; a prefix without an
+extension gets `.json`. Explicit single-role commands still use the exact
+`--state` path provided. `--reset` without a mode resets both roles while
+keeping their identities.
 
 Emitters forget remembered receivers after 10 consecutive failed connection
 attempts. Successful connections reset the count; discovery can find forgotten

@@ -19,6 +19,11 @@ func TestLocalVideoIntegration(t *testing.T) {
 	if os.Getenv("PATVS_INTEGRATION") != "1" {
 		t.Skip("set PATVS_INTEGRATION=1 with FFmpeg installed")
 	}
+	t.Run("separate", func(t *testing.T) { testLocalVideoIntegration(t, false) })
+	t.Run("combined", func(t *testing.T) { testLocalVideoIntegration(t, true) })
+}
+
+func testLocalVideoIntegration(t *testing.T, combined bool) {
 	root := filepath.Join(t.TempDir(), "state with spaces")
 	udp, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
@@ -32,8 +37,8 @@ func TestLocalVideoIntegration(t *testing.T) {
 		StatePath: filepath.Join(root, "receiver.json"), SnapshotDir: filepath.Join(root, "snapshots"),
 		Player: os.Getenv("PATVS_TEST_PLAYER")}
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	done := make(chan error, 2)
-	go func() { done <- RunReceiver(ctx, cfg) }()
 	emitter := cfg
 	emitter.Mode, emitter.Name = "emitter", "test camera"
 	emitter.StatePath = filepath.Join(root, "emitter.json")
@@ -42,10 +47,20 @@ func TestLocalVideoIntegration(t *testing.T) {
 	if emitter.Camera == "" {
 		emitter.Camera = "lavfi:color=c=red:s=640x480:r=25"
 	}
-	go func() { done <- RunEmitter(ctx, emitter) }()
+	roles := 2
+	if combined {
+		cfg.StatePath = filepath.Join(root, "node.json")
+		cfg.Camera = emitter.Camera
+		emitter.Name = cfg.Name
+		roles = 1
+		go func() { done <- RunBoth(ctx, cfg) }()
+	} else {
+		go func() { done <- RunReceiver(ctx, cfg) }()
+		go func() { done <- RunEmitter(ctx, emitter) }()
+	}
 	defer func() {
 		cancel()
-		for range 2 {
+		for range roles {
 			select {
 			case err := <-done:
 				if err != nil {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -52,6 +53,7 @@ type receiver struct {
 	mu        sync.RWMutex
 	state     receiverDiskState
 	sessions  map[string]*emitterSession
+	sessionWG sync.WaitGroup
 	latest    map[string][]byte
 	waiters   map[string][]chan []byte
 	listeners map[string]map[chan []byte]struct{}
@@ -63,7 +65,9 @@ type receiver struct {
 	dirty     bool
 }
 
-func RunReceiver(ctx context.Context, cfg Config) error {
+func RunReceiver(ctx context.Context, cfg Config) (err error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	slog.Info("receiver starting", "name", cfg.Name, "state", cfg.StatePath, "discovery_port", cfg.DiscoveryPort)
 	defer slog.Info("receiver stopped")
 	r := &receiver{
@@ -101,28 +105,46 @@ func RunReceiver(ctx context.Context, cfg Config) error {
 	if err := r.save(); err != nil {
 		return err
 	}
+	baseContext := func(net.Listener) context.Context { return ctx }
+	api := &http.Server{Addr: cfg.APIAddr, Handler: r.apiHandler(), ReadHeaderTimeout: 5 * time.Second, BaseContext: baseContext}
+	stream := &http.Server{Addr: cfg.StreamAddr, Handler: r.streamHandler(), ReadHeaderTimeout: 5 * time.Second, BaseContext: baseContext}
+	var wg sync.WaitGroup
+	defer func() {
+		slog.Info("receiver shutting down")
+		cancel()
+		// Shutdown does not close hijacked WebSocket connections.
+		r.mu.Lock()
+		for _, session := range r.sessions {
+			_ = session.conn.Close()
+		}
+		r.mu.Unlock()
+		shutdownCtx, stop := context.WithTimeout(context.Background(), 4*time.Second)
+		defer stop()
+		if api.Shutdown(shutdownCtx) != nil {
+			_ = api.Close()
+		}
+		if stream.Shutdown(shutdownCtx) != nil {
+			_ = stream.Close()
+		}
+		wg.Wait()
+		r.sessionWG.Wait()
+		r.stopPlayer()
+		err = errors.Join(err, r.save())
+	}()
 	if err := startDiscoveryResponder(ctx, cfg, r.state.Identity); err != nil {
 		return err
 	}
-
-	api := &http.Server{Addr: cfg.APIAddr, Handler: r.apiHandler(), ReadHeaderTimeout: 5 * time.Second}
-	stream := &http.Server{Addr: cfg.StreamAddr, Handler: r.streamHandler(), ReadHeaderTimeout: 5 * time.Second}
 	errorsCh := make(chan error, 2)
-	go func() { errorsCh <- normalizeServerError(api.ListenAndServe()) }()
-	go func() { errorsCh <- normalizeServerError(stream.ListenAndServe()) }()
-	go r.maintenance(ctx)
-	go r.discoverPeers(ctx)
+	wg.Add(4)
+	go func() { defer wg.Done(); errorsCh <- normalizeServerError(api.ListenAndServe()) }()
+	go func() { defer wg.Done(); errorsCh <- normalizeServerError(stream.ListenAndServe()) }()
+	go func() { defer wg.Done(); r.maintenance(ctx) }()
+	go func() { defer wg.Done(); r.discoverPeers(ctx) }()
 
 	slog.Info("receiver ready", "id", r.state.Identity.ID, "api", cfg.APIAddr, "streams", cfg.StreamAddr)
 	select {
 	case <-ctx.Done():
-		slog.Info("receiver shutting down")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-		defer cancel()
-		_ = api.Shutdown(shutdownCtx)
-		_ = stream.Shutdown(shutdownCtx)
-		r.stopPlayer()
-		return r.save()
+		return nil
 	case err := <-errorsCh:
 		return err
 	}
@@ -326,6 +348,8 @@ func (r *receiver) handleSession(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	defer conn.Close()
+	stopClose := context.AfterFunc(request.Context(), func() { _ = conn.Close() })
+	defer stopClose()
 	conn.SetReadLimit(maxFrameSize)
 	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	var register sessionMessage
@@ -336,6 +360,12 @@ func (r *receiver) handleSession(w http.ResponseWriter, request *http.Request) {
 	session := &emitterSession{conn: conn}
 	now := time.Now()
 	r.mu.Lock()
+	if request.Context().Err() != nil {
+		r.mu.Unlock()
+		return
+	}
+	r.sessionWG.Add(1)
+	defer r.sessionWG.Done()
 	if old := r.sessions[register.ID]; old != nil {
 		slog.Info("replacing emitter session", "emitter_id", register.ID)
 		_ = old.conn.Close()
