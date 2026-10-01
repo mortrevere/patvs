@@ -26,11 +26,9 @@ go test ./...
 ./scripts/build.sh
 ```
 
-The build creates static Linux binaries, Windows `.exe` files, and checksums
-under `dist/`. On Windows with Go installed, run
-`powershell -ExecutionPolicy Bypass -File ./scripts/build.ps1` to build the
-same five targets. Optional
-build metadata can be supplied without editing source:
+The Linux build cross-compiles static Linux binaries and Windows `.exe` files
+and writes checksums under `dist/`. Optional build metadata can be supplied
+without editing source:
 
 ```sh
 VERSION=0.1.0 SEEDS=receiver.example.net:7411 ./scripts/build.sh
@@ -38,7 +36,7 @@ VERSION=0.1.0 SEEDS=receiver.example.net:7411 ./scripts/build.sh
 
 GitHub Actions runs tests and publishes these binaries and `SHA256SUMS` as a
 release on pushes to any branch that change Go files, `go.mod`, `go.sum`, the
-build scripts, or the release workflow. Native Linux and Windows tests must
+build script, or the release workflow. Native Linux and Windows tests must
 pass before publishing. Releases use unique
 `build-<run number>-<attempt>` tags pointing to the pushed commit.
 Each published release is marked as latest, so the download URL stays stable:

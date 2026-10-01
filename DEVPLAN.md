@@ -427,7 +427,7 @@ Acceptance targets on a healthy small LAN:
   state, FFmpeg/VLC executable discovery, and CIM media-process inspection.
   Windows VLC runs in a separate instance and stops via process termination.
   Emitter shutdown now waits for its cancelled capture processes to exit.
-- Shell and PowerShell builds produce the three existing Linux targets and
+- Linux cross-builds produce the three existing Linux targets and
   `patvs-windows-amd64.exe`/`patvs-windows-arm64.exe` with one checksum file.
   Release CI runs Linux and Windows tests/vet before publishing all five.
 - Linux race tests, vet, and the existing synthetic integration harness pass.
